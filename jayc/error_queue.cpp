@@ -15,26 +15,31 @@ error_queue &error_queue::get() {
   return queue;
 }
 
-template <char mark, typename T, typename CharT>
+template <char mark, typename T, typename CharT, typename Contained>
 void perform_log(
+  const bool muted,
   std::basic_ostream<CharT> &out,
   std::basic_ostream<CharT> &(*color)(std::basic_ostream<CharT> &),
-  const T &t
+  const T &t,
+  std::vector<Contained> &buffer
 ) {
-  out << color << "[" << mark << "]: At " << t.loc << ": " << t.message << termcolor::reset << "\n";
+  if(!muted) {
+    out << color << "[" << mark << "]: At " << t.loc << ": " << t.message << termcolor::reset << "\n";
+  }
+  buffer.push_back(Contained{t});
 }
 
 error_queue &error_queue::operator<<(const error &e) {
-  perform_log<'E'>(std::cerr, termcolor::red, e);
+  perform_log<'E'>(muted[2], std::cerr, termcolor::red, e, queue);
   return *this;
 }
 
 error_queue &error_queue::operator<<(const warning &w) {
-  perform_log<'W'>(std::cerr, termcolor::yellow, w);
+  perform_log<'W'>(muted[1], std::cerr, termcolor::yellow, w, queue);
   return *this;
 }
 
 error_queue &error_queue::operator<<(const info &i) {
-  perform_log<'I'>(std::cout, termcolor::blue, i);
+  perform_log<'I'>(muted[0], std::cout, termcolor::blue, i, queue);
   return *this;
 }

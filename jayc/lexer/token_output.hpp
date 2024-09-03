@@ -9,15 +9,16 @@
 
 #include "token_stream.hpp"
 
-inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::eof &) {
+namespace jayc::lexer {
+inline std::ostream &operator<<(std::ostream &target, const eof &) {
   return target << "EOF";
 }
 
-inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::invalid_ignored &) {
+inline std::ostream &operator<<(std::ostream &target, const invalid_ignored &) {
   return target << "invalid (error) or ignored (comment)";
 }
 
-inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::symbol &sym) {
+inline std::ostream &operator<<(std::ostream &target, const symbol &sym) {
 #define X(e, s) case jayc::lexer::symbol::e: return target << #e << " (`" s "`)";
 #define SYMBOLS \
   X(PLUS, "+") X(MINUS, "-") X(MULTIPLY, "*") X(DIVIDE, "/") X(MODULO, "%") \
@@ -39,7 +40,7 @@ inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::symbol 
   return target;
 }
 
-inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::keyword &kw) {
+inline std::ostream &operator<<(std::ostream &target, const keyword &kw) {
 #define X(e) case jayc::lexer::keyword::e: return target << #e;
 #define KEYWORDS \
   X(FUN) X(VAR) X(IF) X(ELSE) X(FOR) X(WHILE) X(DO) X(RETURN) X(BREAK) X(CONTINUE) \
@@ -55,7 +56,7 @@ inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::keyword
   return target;
 }
 
-inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::identifier &id) {
+inline std::ostream &operator<<(std::ostream &target, const identifier &id) {
   return target << "IDENTIFIER (`" << id.ident << "`)";
 }
 
@@ -72,14 +73,18 @@ template <> struct _internal_type_name<bool> { constexpr static auto value = "bo
 }
 
 template <typename T>
-inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::literal<T> &lit) {
+inline std::ostream &operator<<(std::ostream &target, const literal<T> &lit) {
   return target << "LITERAL(" << internal_::_internal_type_name<T>::value << ") `" << lit.value << "`";
 }
 
-inline std::ostream &operator<<(std::ostream &target, const jayc::lexer::token &tok) {
+// namespace jayc::lexer {
+inline std::ostream &operator<<(std::ostream &target, const token &tok) {
   target << tok.pos << ": ";
   std::visit([&target](const auto &x) { target << x; }, tok.actual);
   return target;
 }
+}
+
+using jayc::lexer::operator<<;
 
 #endif //TOKEN_OUTPUT_HPP

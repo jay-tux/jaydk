@@ -12,18 +12,7 @@ using jayc::location;
 using jayc::logger;
 using namespace jayc::lexer;
 
-token next_token(std::ifstream &strm, location &curr);
-
-location move_forward(location &old, const int lines, const int cols) {
-  location copy = old;
-  old.line += lines;
-  old.col += cols;
-  return copy;
-}
-
-token lexer::operator()() { return next_token(input, curr); }
-
-token_stream<lexer> jayc::lexer::lex(const std::string &file) {
+token_stream<lexer<std::ifstream>> jayc::lexer::lex(const std::string &file) {
   std::ifstream strm{file};
 
   if(!strm.is_open() || !strm.good()) {
@@ -32,4 +21,8 @@ token_stream<lexer> jayc::lexer::lex(const std::string &file) {
   }
 
   return token_stream{lexer{file, std::move(strm)}};
+}
+
+token_stream<lexer<std::stringstream>> jayc::lexer::lex_source(const std::string &source) {
+  return token_stream{lexer{"<inline script>", std::stringstream{source}}};
 }

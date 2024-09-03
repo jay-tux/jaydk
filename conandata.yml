@@ -2,5 +2,6 @@
 # To keep your changes, remove these comment lines, but the plugin won't be able to modify your requirements
 
 requirements:
+  - "doctest/2.4.11"
   - "termcolor/2.1.0"
   - "argparse/3.1"

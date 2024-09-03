@@ -6,7 +6,9 @@ set(CMAKE_CXX_STANDARD 20)
 
 find_package(argparse REQUIRED)
 find_package(termcolor REQUIRED)
+find_package(doctest REQUIRED)
 
 add_subdirectory(common/)
 add_subdirectory(jayc/)
 add_subdirectory(jayvm/)
+add_subdirectory(test/)

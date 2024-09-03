@@ -3,10 +3,11 @@
 //
 
 #include <iostream>
-#include <fstream>
 #include <unordered_map>
 #include <utility>
+
 #include "token_stream.hpp"
+#include "lexer.hpp"
 
 using namespace jayc;
 using namespace jayc::lexer;
@@ -19,7 +20,7 @@ std::unordered_map<std::string, keyword> keywords = {
   {"struct", keyword::STRUCT}
 };
 
-inline token numerical(const char first, std::ifstream &strm, location &curr) {
+inline token numerical(const char first, std::istream &strm, location &curr) {
   const location start = curr;
   char next = static_cast<char>(strm.peek());
   if(next == 'x' || next == 'X') {
@@ -72,12 +73,12 @@ inline token numerical(const char first, std::ifstream &strm, location &curr) {
   return token{ literal{std::stol(buf)}, start };
 }
 
-inline token keyword_identifier(const char first, std::ifstream &strm, location &curr) {
+inline token keyword_identifier(const char first, std::istream &strm, location &curr) {
   std::string buffer;
   buffer += first;
   const location start = curr;
   char next = static_cast<char>(strm.peek());
-  while(isalnum(next) || next == '_') {
+  while(!strm.eof() && (isalnum(next) || next == '_')) {
     buffer += next; strm.get(); curr.col++; // eat & keep
     next = static_cast<char>(strm.peek());
   }
@@ -90,7 +91,7 @@ inline token keyword_identifier(const char first, std::ifstream &strm, location 
   return token{it->second, start};
 }
 
-inline token escaped_char_literal(std::ifstream &strm, location start, location &curr) {
+inline token escaped_char_literal(std::istream &strm, location start, location &curr) {
   char discard = static_cast<char>(strm.get()); curr.col++; // eat and keep
   char actual;
   switch(discard) {
@@ -130,7 +131,7 @@ inline token escaped_char_literal(std::ifstream &strm, location start, location 
   return token{literal{actual}, start};
 }
 
-inline token char_literal(std::ifstream &strm, location &curr) {
+inline token char_literal(std::istream &strm, location &curr) {
   const location start = curr;
   switch(strm.peek()) {
     case '\'': {
@@ -162,7 +163,7 @@ inline token char_literal(std::ifstream &strm, location &curr) {
   }
 }
 
-inline token string_literal(std::ifstream &strm, location &curr) {
+inline token string_literal(std::istream &strm, location &curr) {
   const location start = curr;
   bool escaped = false;
   bool was_escaped = false;
@@ -216,26 +217,26 @@ inline token string_literal(std::ifstream &strm, location &curr) {
 }
 
 template <bool eat>
-constexpr token get(const symbol s, std::ifstream &strm, const location &start, location &curr) {
+constexpr token get(const symbol s, std::istream &strm, const location &start, location &curr) {
   if constexpr(eat) { strm.get(); curr.col++; }
   return token{s, start};
 }
 
-inline token either(const symbol no_match, const char check, const symbol match, std::ifstream &strm, location &curr) {
+inline token either(const symbol no_match, const char check, const symbol match, std::istream &strm, location &curr) {
   const location start = curr;
   if(strm.peek() == check) return get<true>(match, strm, start, curr);
   return get<false>(no_match, strm, start, curr);
 }
 
-inline token either_or(const symbol no_match, const char check, const symbol match, const char check2, const symbol match2, std::ifstream &strm, location &curr) {
+inline token either_or(const symbol no_match, const char check, const symbol match, const char check2, const symbol match2, std::istream &strm, location &curr) {
   const location start = curr;
-  const char temp = strm.peek();
+  const char temp = static_cast<char>(strm.peek());
   if(temp == check) return get<true>(match, strm, start, curr);
   if(temp == check2) return get<true>(match2, strm, start, curr);
   return get<false>(no_match, strm, start, curr);
 }
 
-inline token line_comment(std::ifstream &strm, location &curr) {
+inline token line_comment(std::istream &strm, location &curr) {
   // first up -> remove second / from //
   strm.get(); curr.col++;
 
@@ -251,7 +252,7 @@ inline token line_comment(std::ifstream &strm, location &curr) {
   return { invalid_ignored{}, curr };
 }
 
-inline token block_comment(std::ifstream &strm, location &curr) {
+inline token block_comment(std::istream &strm, location &curr) {
   size_t depth = 1;
   bool last_was_star = false;
   bool last_was_slash = false;
@@ -301,7 +302,7 @@ inline token block_comment(std::ifstream &strm, location &curr) {
   return { invalid_ignored{}, curr };
 }
 
-inline token symbol_token(const char first, std::ifstream &strm, location &curr) {
+inline token symbol_token(const char first, std::istream &strm, location &curr) {
   const location start = curr;
   switch(first) {
     case '!': return either(symbol::NOT, '=', symbol::NOT_EQUALS, strm, curr);
@@ -341,7 +342,7 @@ inline token symbol_token(const char first, std::ifstream &strm, location &curr)
   }
 }
 
-token next_token(std::ifstream &strm, location &curr) {
+token jayc::lexer::read_token(std::istream &strm, location &curr) {
   char next;
 
   // eliminate whitespace, keep track of position
