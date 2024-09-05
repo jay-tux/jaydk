@@ -228,22 +228,26 @@ struct decl_printer {
   inline void operator()(std::ostream &target, const function_decl &f, const location &pos, const size_t i) const {
     target << indent{i} << "declaration of function `" << f.name << "` (at " << pos << ")\n";
     target << indent{i + 1} << "with " << f.args.size() << " argument(s)\n";
-    for(const auto &[t, n]: f.args) {
-      target << indent{i + 2} << t << " " << n << "\n";
+    for(const auto &[t, n, p]: f.args) {
+      target << indent{i + 2} << t << " " << n << " (at " << p << ")\n";
     }
     target << indent{i + 1} << "with body\n";
-    print_stmt(target, f.body, i + 2);
+    for(const auto &s: f.body) {
+      print_stmt(target, s, i + 2);
+    }
   }
 
   inline void operator()(std::ostream &target, const ext_function_decl &f, const location &pos, const size_t i) const {
     target << indent{i} << "declaration of function `" << f.name << "` (at " << pos << ")\n";
     target << indent{i + 1} << "with receiver " << f.receiver << "\n";
     target << indent{i + 1} << "with " << f.args.size() << " argument(s)\n";
-    for(const auto &[t, n]: f.args) {
-      target << indent{i + 2} << t << " " << n << "\n";
+    for(const auto &[t, n, p]: f.args) {
+      target << indent{i + 2} << t << " " << n << " (at " << p << ")\n";
     }
     target << indent{i + 1} << "with body\n";
-    print_stmt(target, f.body, i + 2);
+    for(const auto &s: f.body) {
+      print_stmt(target, s, i + 2);
+    }
   }
 
   inline void operator()(std::ostream &target, const type_decl &t, const location &pos, const size_t i) const {

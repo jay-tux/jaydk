@@ -25,6 +25,7 @@ public:
   explicit token_it(F f) : get{std::move(f)} { current.actual = lexer::invalid_ignored{}; consume(); }
 
   const lexer::token &operator*() const { return current; }
+  const lexer::token *operator->() const { return &current; }
   const lexer::token &peek() {
     if(!lookahead.has_value()) {
       if(jaydk::is<lexer::eof>(current.actual)) lookahead = current;

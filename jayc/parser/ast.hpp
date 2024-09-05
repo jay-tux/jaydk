@@ -167,33 +167,25 @@ struct namespace_decl {
   std::vector<declaration> declarations;
 };
 
+// TODO: template arguments?
 struct function_decl {
-  std::string name;
-  std::vector<std::pair<type_name, std::string>> args;
-  statement body;
-};
-
-struct ext_function_decl {
-  type_name receiver;
-  std::string name;
-  std::vector<std::pair<type_name, std::string>> args;
-  statement body;
-};
-
-struct type_decl {
-  struct field_decl {
+  struct arg {
     type_name type;
     std::string name;
-    std::optional<expression> initial;
     location pos;
   };
-
   std::string name;
-  std::vector<std::string> template_args;
-  std::vector<type_name> bases;
-  std::vector<field_decl> fields;
-  std::vector<std::pair<function_decl, location>> members;
-  std::vector<std::pair<type_decl, location>> nested_types;
+  std::vector<arg> args;
+  std::vector<statement> body;
+};
+
+// TODO: template arguments?
+struct ext_function_decl {
+  using arg = function_decl::arg;
+  type_name receiver;
+  std::string name;
+  std::vector<arg> args;
+  std::vector<statement> body;
 };
 
 struct global_decl {
@@ -201,9 +193,24 @@ struct global_decl {
   expression value;
 };
 
+struct typed_global_decl {
+  type_name type;
+  std::string name;
+  std::optional<expression> initial;
+};
+
+struct type_decl {
+  std::string name;
+  std::vector<std::string> template_args;
+  std::vector<type_name> bases;
+  std::vector<std::pair<typed_global_decl, location>> fields;
+  std::vector<std::pair<function_decl, location>> members;
+  std::vector<std::pair<type_decl, location>> nested_types;
+};
+
 struct declaration : node {
   using actual_t = std::variant<
-    namespace_decl, function_decl, ext_function_decl, type_decl, global_decl
+    namespace_decl, function_decl, ext_function_decl, type_decl, global_decl, typed_global_decl
   >;
 
   template <typename T> requires(jaydk::is_alternative_for<T, actual_t>)
