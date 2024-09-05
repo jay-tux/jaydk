@@ -171,7 +171,7 @@ struct stmt_printer {
     target << indent{i + 1} << "condition:\n";
     print_expr(target, f.condition, i + 2);
     target << indent{i + 1} << "iterator:\n";
-    print_stmt(target, *f.update, i + 2);
+    print_expr(target, f.update, i + 2);
     target << indent{i + 1} << "body:\n";
     print_stmt(target, *f.block, i + 2);
   }
@@ -180,17 +180,20 @@ struct stmt_printer {
     target << indent{i} << "for-each statement (at " << pos << ")\n";
     target << indent{i + 1} << "binding: " << f.binding << "\n";
     target << indent{i + 1} << "collection:\n";
-    print_expr(target, *f.collection, i + 2);
+    print_expr(target, f.collection, i + 2);
     target << indent{i + 1} << "body:\n";
     print_stmt(target, *f.block, i + 2);
   }
 
   inline void operator()(std::ostream &target, const while_stmt &w, const location &pos, const size_t i) const {
-    target << indent{i} << "while statement (at " << pos << ")\n";
+    if(!w.is_do_while)
+      target << indent{i} << "while statement (at " << pos << ")\n";
+    else
+      target << indent{i} << "do-while statement (at " << pos << ")\n";
     target << indent{i + 1} << "condition:\n";
     print_expr(target, w.condition, i + 2);
     target << indent{i + 1} << "body:\n";
-    print_stmt(target, *w.block, i + 2);
+    for(const auto &s: w.block) print_stmt(target, s, i + 2);
   }
 
   inline void operator()(std::ostream &target, const break_stmt &, const location &pos, const size_t i) const {

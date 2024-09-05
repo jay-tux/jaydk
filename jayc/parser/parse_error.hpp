@@ -30,6 +30,10 @@ namespace jayc::parser {
   inline error ns_in_struct(const location &pos) {
     return error{ pos, "Declaration of namespace in struct is not allowed." };
   }
+
+  inline error else_no_if(const location &pos) {
+    return error{ pos, "Else without preceding if-statement." };
+  }
 }
 
 #endif //PARSE_ERROR_HPP

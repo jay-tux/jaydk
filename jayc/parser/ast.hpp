@@ -62,6 +62,12 @@ struct binary_expr {
   jaydk::managed<expression> right;
 };
 
+struct ternary_expr {
+  jaydk::managed<expression> cond;
+  jaydk::managed<expression> true_expr;
+  jaydk::managed<expression> false_expr;
+};
+
 struct call_expr {
   jaydk::managed<expression> call;
   std::vector<expression> args;
@@ -76,7 +82,7 @@ struct expression : node {
   using actual_t = std::variant<
     literal_expr<int64_t>, literal_expr<uint64_t>, literal_expr<float>, literal_expr<double>,
     literal_expr<char>, literal_expr<std::string>, literal_expr<bool>, name_expr,
-    unary_expr, binary_expr, call_expr, member_expr
+    unary_expr, binary_expr, ternary_expr, call_expr, member_expr
   >;
 
   template <typename T> requires(jaydk::is_alternative_for<T, actual_t>)
@@ -122,20 +128,20 @@ struct if_stmt {
 struct for_stmt {
   jaydk::managed<statement> init;
   expression condition;
-  jaydk::managed<statement> update;
+  expression update;
   jaydk::managed<statement> block;
 };
 
 struct for_each_stmt {
   std::string binding;
-  jaydk::managed<expression> collection;
+  expression collection;
   jaydk::managed<statement> block;
 };
 
 struct while_stmt {
   bool is_do_while = false;
   expression condition;
-  jaydk::managed<statement> block;
+  std::vector<statement> block;
 };
 
 struct break_stmt {};
@@ -147,7 +153,7 @@ struct return_stmt {
 
 struct statement : node {
   using actual_t = std::variant<
-    block, var_decl_stmt, assign_stmt, op_assign_stmt, if_stmt, for_stmt, for_each_stmt,
+    block, expr_stmt, var_decl_stmt, assign_stmt, op_assign_stmt, if_stmt, for_stmt, for_each_stmt,
     while_stmt, break_stmt, continue_stmt, return_stmt
   >;
 

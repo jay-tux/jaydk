@@ -61,6 +61,9 @@ private:
   T *ptr = nullptr;
 };
 
+template <typename T>
+managed<T> alloc(const T &t) { return managed(t); }
+
 template <typename V> struct is_variant : std::false_type {};
 template <typename ... Ts> struct is_variant<std::variant<Ts...>> : std::true_type {};
 
