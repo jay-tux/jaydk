@@ -5,7 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_library(jayc_lib STATIC jayc.cpp
         error_queue.cpp
-        lexer/token_stream.cpp lexer/lexer.cpp lexer/lex_fsm.cpp
+        lexer/token_stream.cpp lexer/lexer.cpp
+        lexer/fsm.cpp
 )
 add_executable(jayc main.cpp)
 

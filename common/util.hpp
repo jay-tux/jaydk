@@ -14,6 +14,11 @@ constexpr bool is(const std::variant<Ts...> &v) {
   return std::holds_alternative<X>(v);
 }
 
+template <typename X, typename ... Ts>
+constexpr X &as(std::variant<Ts...> &v) { return std::get<X>(v); }
+template <typename X, typename ... Ts>
+constexpr const X &as(const std::variant<Ts...> &v) { return std::get<X>(v); }
+
 template <typename X, std::ranges::range R>
 constexpr bool count_of(R &&range) {
   return std::ranges::count_if(std::forward<R &&>(range), [](const auto &v) { return is<X>(v); });

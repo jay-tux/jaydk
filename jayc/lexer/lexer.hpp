@@ -18,7 +18,7 @@ template <typename Stream> requires(std::derived_from<Stream, std::istream>)
 class lexer {
 public:
   explicit lexer(const std::string &file, Stream &&strm)
-      : input{std::move(strm)}, curr{file, 1, 0} {}
+      : input{std::move(strm)}, curr{file, 1, 1} {}
 
   token operator()() { return read_token(input, curr); }
 

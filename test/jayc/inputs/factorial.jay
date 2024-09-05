@@ -1,0 +1,12 @@
+fun factorial(int x) {
+    if(x <= 1) return 1;
+    return x * factorial(x - 1);
+}
+
+fun factorial_non_rec(int x) {
+    int acc = x;
+    while(x --> 0) {
+        acc *= x;
+    }
+    return acc;
+}
