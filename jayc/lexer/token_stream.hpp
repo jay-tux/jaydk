@@ -12,8 +12,14 @@
 #include "error_queue.hpp"
 
 namespace jayc::lexer {
-struct eof {};
-struct invalid_ignored {};
+struct eof {
+  constexpr bool operator==(const eof &) const { return true; }
+};
+
+struct invalid_ignored {
+  constexpr bool operator==(const invalid_ignored &) const { return true; }
+};
+
 enum class symbol {
   PLUS, MINUS, MULTIPLY, DIVIDE, MODULO,
   INCREMENT, DECREMENT, ASSIGN,
@@ -26,8 +32,14 @@ enum class symbol {
 enum class keyword {
   FUN, VAR, IF, ELSE, FOR, WHILE, DO, RETURN, BREAK, CONTINUE, NAMESPACE, STRUCT
 };
-struct identifier { std::string ident; };
-template <typename T> struct literal { T value; };
+struct identifier {
+  std::string ident;
+  constexpr bool operator==(const identifier &other) const { return ident == other.ident; }
+};
+template <typename T> struct literal {
+  T value;
+  constexpr bool operator==(const literal &other) const { return value == other.value; }
+};
 
 using token_t = std::variant<
   eof, invalid_ignored, symbol, keyword, identifier, literal<int64_t>,

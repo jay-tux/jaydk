@@ -6,6 +6,7 @@
 #define TOKEN_OUTPUT_HPP
 
 #include <iostream>
+#include <sstream>
 
 #include "token_stream.hpp"
 
@@ -77,11 +78,16 @@ inline std::ostream &operator<<(std::ostream &target, const literal<T> &lit) {
   return target << "LITERAL(" << internal_::_internal_type_name<T>::value << ") `" << lit.value << "`";
 }
 
-// namespace jayc::lexer {
 inline std::ostream &operator<<(std::ostream &target, const token &tok) {
   target << tok.pos << ": ";
   std::visit([&target](const auto &x) { target << x; }, tok.actual);
   return target;
+}
+
+inline std::string token_type(const token &t) {
+  std::stringstream ss;
+  ss << t;
+  return ss.str();
 }
 }
 
