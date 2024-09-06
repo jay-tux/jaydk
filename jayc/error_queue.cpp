@@ -31,6 +31,11 @@ void perform_log(
 
 error_queue &error_queue::operator<<(const error &e) {
   perform_log<'E'>(muted[2], std::cerr, termcolor::red, e, queue);
+
+  if(throw_on_error) {
+    throw any_error_happened(e.message);
+  }
+
   return *this;
 }
 

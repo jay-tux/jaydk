@@ -42,6 +42,8 @@ int main(const int argc, const char **argv) {
   try {
     arg_parser.parse_args(argc, argv);
 
+    jayc::logger.enable_throw_on_error();
+
     args.input = arg_parser.get<std::string>("input");
     if(arg_parser.present("-o")) args.output = arg_parser.get<std::string>("-o");
 

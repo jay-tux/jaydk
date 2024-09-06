@@ -27,7 +27,6 @@ std::optional<qualified_name> parse_qname(token_it &iterator) {
   }
 
   res.sections.push_back(as<identifier>(token.actual).ident);
-  iterator.consume();
   token = *iterator;
   while(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::NAMESPACE) {
     iterator.consume();
@@ -369,19 +368,24 @@ struct expr_pratt {
 
   std::optional<expression> parse(const uint8_t precedence) {
     auto token = *iterator;
-    iterator.consume();
 
     std::optional<expression> left = literal_to_expr(token);
-    if(is<identifier>(token.actual)) {
-      auto qname = parse_qname(iterator);
-      if(!qname.has_value()) {
-        logger << expect("qualified name", token);
-        return left;
-      }
-      left = expression(name_expr{ std::move(*qname) }, token.pos);
+    if(left.has_value()) {
+      iterator.consume();
     }
-    else if(is<symbol>(token.actual) && is_prefix(as<symbol>(token.actual))) {
-      left = parse_prefix(as<symbol>(token.actual), token.pos);
+    if(!left.has_value()) {
+      if(is<identifier>(token.actual)) {
+        auto qname = parse_qname(iterator);
+        if(!qname.has_value()) {
+          logger << expect("qualified name", token);
+          return left;
+        }
+        left = expression(name_expr{ std::move(*qname) }, token.pos);
+      }
+      else if(is<symbol>(token.actual) && is_prefix(as<symbol>(token.actual))) {
+        iterator.consume();
+        left = parse_prefix(as<symbol>(token.actual), token.pos);
+      }
     }
 
     if(!left.has_value()) {
@@ -753,12 +757,12 @@ std::optional<statement> parse_do_while_stmt(token_it &iterator) {
 
 template <typename T>
 std::optional<T> check_semi(token_it &iterator, const T &t) {
-  iterator.consume();
-  const auto &[a, _] = *iterator;
+  const auto [a, p] = *iterator;
   iterator.consume();
   if(is<symbol>(a) && as<symbol>(a) == symbol::SEMI) {
     return t;
   }
+  logger << expect("semicolon (`;`)", {a, p});
   return std::nullopt;
 }
 
@@ -801,6 +805,7 @@ std::optional<statement> parse_stmt(token_it &iterator) {
     iterator.consume(); // consume }
     return statement(block{ .statements = body }, pos);
   }
+
   if(is<keyword>(actual)) {
     switch(as<keyword>(actual)) {
       case keyword::VAR: return parse_var_decl_stmt(iterator);
@@ -866,7 +871,7 @@ std::optional<declaration> parse_fun_decl(token_it &iterator) {
 
   std::vector<function_decl::arg> args;
   while(!iterator.eof()) {
-    const auto p = (*iterator).pos;
+    const auto p = iterator->pos;
     auto tname = parse_tname(iterator);
     if(tname == std::nullopt) return std::nullopt;
     auto a_name = *iterator;
@@ -881,7 +886,9 @@ std::optional<declaration> parse_fun_decl(token_it &iterator) {
     token = *iterator;
     iterator.consume(); // consume , or )
     if(is<symbol>(token.actual)) {
-      if(as<symbol>(token.actual) == symbol::PAREN_CLOSE) break;
+      if(as<symbol>(token.actual) == symbol::PAREN_CLOSE) {
+        break;
+      }
       if(as<symbol>(token.actual) != symbol::COMMA) {
         logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
         return std::nullopt;
@@ -902,10 +909,11 @@ std::optional<declaration> parse_fun_decl(token_it &iterator) {
 
   std::vector<statement> body;
   token = *iterator;
-  if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_CLOSE) {
+  while(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_CLOSE) {
     auto stmt = parse_stmt(iterator);
     if(stmt == std::nullopt) return std::nullopt;
     body.push_back(*stmt);
+    token = *iterator;
   }
 
   iterator.consume(); // consume }

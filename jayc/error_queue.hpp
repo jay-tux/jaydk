@@ -36,6 +36,13 @@ struct error {
   std::string message;
 };
 
+struct any_error_happened final : std::runtime_error {
+  using std::runtime_error::runtime_error;
+
+  // ReSharper disable once CppNonExplicitConvertingConstructor
+  inline any_error_happened(const std::string &what) : std::runtime_error(what) {} // NOLINT(*-explicit-constructor)
+};
+
 class error_queue {
 public:
   error_queue(const error_queue&) = delete;
@@ -73,12 +80,16 @@ public:
     return jaydk::count_of<error>(queue.back());
   }
 
+  inline void enable_throw_on_error() { throw_on_error = true; }
+  inline void disable_throw_on_error() { throw_on_error = false; }
+
   constexpr ~error_queue() = default;
 private:
   constexpr error_queue() : queue{std::vector<msg>{}} {}
 
   using msg = std::variant<info, warning, error>;
   bool muted[3] = { false, false, false };
+  bool throw_on_error = false;
   std::vector<std::vector<msg>> queue;
 };
 
