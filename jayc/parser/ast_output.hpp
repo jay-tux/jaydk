@@ -16,10 +16,11 @@ struct indent {
 
 inline std::ostream &operator<<(std::ostream &target, const indent &i) {
   if(i.level == 0) return target;
-  if(i.level == 1) return target << "+";
+  target << " ";
+  if(i.level == 1) return target << "+ ";
   target << "|";
   for(size_t j = 0; j < i.level - 1; j++) target << " |";
-  target << " +";
+  target << " + ";
   return target;
 }
 
@@ -99,9 +100,9 @@ struct expr_printer {
     target << indent{i} << "call (at " << pos << ")\n"
            << indent{i + 1} << "functor: \n";
     print_expr(target, *c.call, i + 2);
-    for(size_t i = 0; i < c.args.size(); i++) {
-      target << indent{i + 1} << "args[" << i << "]:\n";
-      print_expr(target, c.args[i], i + 2);
+    for(size_t j = 0; j < c.args.size(); j++) {
+      target << indent{i + 1} << "args[" << j << "]:\n";
+      print_expr(target, c.args[j], i + 2);
     }
   }
   inline void operator()(std::ostream &target, const member_expr &m, const location &pos, const size_t i) const {

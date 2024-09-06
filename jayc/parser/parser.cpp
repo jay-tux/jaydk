@@ -434,85 +434,97 @@ std::optional<expression> parse_expr(token_it &iterator) {
 using namespace expr_parsers;
 
 namespace stmt_parsers {
+template <typename T>
+std::optional<T> check_semi(token_it &iterator, const T &t) {
+  const auto [a, p] = *iterator;
+  iterator.consume();
+  if(is<symbol>(a) && as<symbol>(a) == symbol::SEMI) {
+    return t;
+  }
+  logger << expect("semicolon (`;`)", {a, p});
+  return std::nullopt;
+}
+
 std::optional<statement> parse_stmt(token_it &iterator);
+
+constexpr std::optional<binary_op> compound_assign_op_for(const symbol s) {
+  switch(s) {
+    using enum symbol;
+    case PLUS_ASSIGN: return binary_op::ADD;
+    case MINUS_ASSIGN: return binary_op::SUBTRACT;
+    case MULTIPLY_ASSIGN: return binary_op::MULTIPLY;
+    case DIVIDE_ASSIGN: return binary_op::DIVIDE;
+    case MODULO_ASSIGN: return binary_op::MODULO;
+    case BIT_AND_ASSIGN: return binary_op::BIT_AND;
+    case BIT_OR_ASSIGN: return binary_op::BIT_OR;
+    case XOR_ASSIGN: return binary_op::XOR;
+    default: return std::nullopt;
+  }
+}
 
 std::optional<statement> parse_initial_expr_stmt(token_it &iterator) {
   // 3 options:
   // <expr>;
   // <expr> = <expr>;
-  // <expr> <bin op> = <expr>;
+  // <expr> <compound assignment> <expr>;
 
   auto pos = iterator->pos;
   const auto left = parse_expr(iterator);
   if(left == std::nullopt) return std::nullopt;
 
   if(!is<symbol>(iterator->actual)) {
-    logger << expect("semicolon (`;`), assignment (`=`), or binary operator", *iterator);
+    logger << expect("semicolon (`;`), assignment (`=`), or compound assignment operator", *iterator);
     iterator.consume();
     return std::nullopt;
   }
 
-  if(as<symbol>(iterator->actual) == symbol::SEMI) {
-    // case 1: <expr>;
-    iterator.consume(); // consume ;
-    return statement(expr_stmt{ .expr = *left }, pos);
-  }
-
-  if(as<symbol>(iterator->actual) == symbol::ASSIGN) {
-    // case 2: <expr> = <expr>;
-    iterator.consume(); // consume =
-    const auto right = parse_expr(iterator);
-    if(right == std::nullopt) return std::nullopt;
-    if(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::SEMI) {
-      logger << expect("semicolon (`;`)", *iterator);
-      iterator.consume();
-      return std::nullopt;
+  switch(const auto sym = as<symbol>(iterator->actual)) {
+    case symbol::SEMI: {
+      // case 1: <expr>;
+      iterator.consume(); // consume ;
+      return statement(expr_stmt{ .expr = *left }, pos);
     }
 
-    return statement(assign_stmt{ .lvalue = *left, .value = *right }, pos);
+    case symbol::ASSIGN: {
+      //case 2: <expr> = <expr>;
+      iterator.consume(); // consume =
+      const auto right = parse_expr(iterator);
+      if(right == std::nullopt) return std::nullopt;
+
+      return check_semi(iterator, statement(assign_stmt{ .lvalue = *left, .value = *right }, pos));
+    }
+
+    case symbol::PLUS_ASSIGN:
+    case symbol::MINUS_ASSIGN:
+    case symbol::MULTIPLY_ASSIGN:
+    case symbol::DIVIDE_ASSIGN:
+    case symbol::MODULO_ASSIGN:
+    case symbol::BIT_AND_ASSIGN:
+    case symbol::BIT_OR_ASSIGN:
+    case symbol::XOR_ASSIGN: {
+      // case 3: <expr> <compound assignment> <expr>;
+      iterator.consume(); // consume compound assignment
+      const auto right = parse_expr(iterator);
+      if(right == std::nullopt) return std::nullopt;
+
+      auto token = *iterator;
+      iterator.consume();
+      if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::SEMI) {
+        logger << expect("semicolon (`;`)", token);
+        iterator.consume();
+        return std::nullopt;
+      }
+
+      return compound_assign_op_for(sym) | [&left, &right, &pos](const binary_op &op) {
+        return statement(op_assign_stmt{ .lvalue = *left, .op = op, .value = *right }, pos);
+      };
+    }
+
+    default: {
+      logger << expect("semicolon (`;`), assignment (`=`), or compound assignment operator", *iterator);
+      return std::nullopt;
+    }
   }
-
-  // case 3: <expr> <bin op> = <expr>;
-  std::optional<binary_op> op = std::nullopt;
-  switch(as<symbol>(iterator->actual)) {
-    case symbol::PLUS: op = binary_op::ADD; break;
-    case symbol::MINUS: op = binary_op::SUBTRACT; break;
-    case symbol::MULTIPLY: op = binary_op::MULTIPLY; break;
-    case symbol::DIVIDE: op = binary_op::DIVIDE; break;
-    case symbol::MODULO: op = binary_op::MODULO; break;
-    case symbol::EQUALS: op = binary_op::EQUAL; break;
-    case symbol::NOT_EQUALS: op = binary_op::NOT_EQUAL; break;
-    case symbol::LESS_THAN: op = binary_op::LESS; break;
-    case symbol::GREATER_THAN: op = binary_op::GREATER; break;
-    case symbol::LESS_THAN_EQUALS: op = binary_op::LESS_EQUAL; break;
-    case symbol::GREATER_THAN_EQUALS: op = binary_op::GREATER_EQUAL; break;
-    case symbol::AND: op = binary_op::BOOL_AND; break;
-    case symbol::OR: op = binary_op::BOOL_OR; break;
-    case symbol::BIT_AND: op = binary_op::BIT_AND; break;
-    case symbol::BIT_OR: op = binary_op::BIT_OR; break;
-    case symbol::XOR: op = binary_op::XOR; break;
-    case symbol::SHIFT_LEFT: op = binary_op::SHIFT_LEFT; break;
-    case symbol::SHIFT_RIGHT: op = binary_op::SHIFT_RIGHT; break;
-    default: break;
-  }
-
-  if(op == std::nullopt) {
-    logger << expect("semicolon (`;`), assignment (`=`), or binary operator", *iterator);
-    iterator.consume();
-    return std::nullopt;
-  }
-
-  iterator.consume();
-
-  const auto right = parse_expr(iterator);
-  if(right == std::nullopt) return std::nullopt;
-  if(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::SEMI) {
-    logger << expect("semicolon (`;`)", *iterator);
-    iterator.consume();
-    return std::nullopt;
-  }
-
-  return statement(op_assign_stmt{ .lvalue = *left, .op = *op, .value = *right }, pos);
 }
 
 std::optional<statement> parse_var_decl_stmt(token_it &iterator) {
@@ -690,6 +702,7 @@ std::optional<statement> parse_while_stmt(token_it &iterator) {
 
   std::vector<statement> body;
   while(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::BRACE_CLOSE) {
+    logger << info{ iterator->pos, "Started parsing statement in while body; *iterator=" + token_type(*iterator)};
     const auto stmt = parse_stmt(iterator);
     if(stmt == std::nullopt) return std::nullopt;
     body.push_back(*stmt);
@@ -753,17 +766,6 @@ std::optional<statement> parse_do_while_stmt(token_it &iterator) {
   }
 
   return statement(while_stmt{ .is_do_while = true, .condition = *expr, .block = body }, pos);
-}
-
-template <typename T>
-std::optional<T> check_semi(token_it &iterator, const T &t) {
-  const auto [a, p] = *iterator;
-  iterator.consume();
-  if(is<symbol>(a) && as<symbol>(a) == symbol::SEMI) {
-    return t;
-  }
-  logger << expect("semicolon (`;`)", {a, p});
-  return std::nullopt;
 }
 
 std::optional<statement> parse_return_stmt(token_it &iterator) {
