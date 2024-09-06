@@ -68,13 +68,13 @@ std::optional<type_name> jayc::parser::parse_tname(token_it &iterator) {
       token = *iterator;
       iterator.consume(); // consume , or >
       if(is<symbol>(token.actual)) {
+        if(as<symbol>(token.actual) == symbol::GREATER_THAN) {
+          break;
+        }
+
         if(as<symbol>(token.actual) != symbol::COMMA) {
           logger << expect("comma (`,`) or closing bracket (`>`)", token);
           return std::nullopt;
-        }
-
-        if(as<symbol>(token.actual) == symbol::GREATER_THAN) {
-          break;
         }
       }
       else {
