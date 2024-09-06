@@ -267,12 +267,20 @@ inline token starts_with_sign(std::istream &strm, location &curr) {
       extract(strm, curr);
       return token{symbol::INCREMENT, start};
     }
+    if(next == '=') {
+      extract(strm, curr);
+      return token{symbol::PLUS_ASSIGN, start};
+    }
     return token{symbol::PLUS, start};
   }
   // else -> sign == '-'
   if(next == '-') {
     extract(strm, curr);
     return token{symbol::DECREMENT, start};
+  }
+  if(next == '=') {
+    extract(strm, curr);
+    return token{symbol::MINUS_ASSIGN, start};
   }
   return token{symbol::MINUS, start};
 }
@@ -335,6 +343,10 @@ inline token div_or_comment(std::istream &strm, location &curr) {
       skip_block_comment(strm, curr);
       break;
     }
+    case '=': {
+      extract(strm, curr);
+      return token{symbol::DIVIDE_ASSIGN, start};
+    }
     default: return token{symbol::DIVIDE, start};
   }
 
@@ -363,9 +375,9 @@ inline token symbol_token(std::istream &strm, location &curr) {
   switch(fst) {
     // no case '+' (also no '++')
     // no case '-' (also no '--')
-    case '*': return token{symbol::MULTIPLY, start};
+    case '*': return multi_matcher(symbol::MULTIPLY, {{'=', symbol::MULTIPLY_ASSIGN}}, strm, start, curr);
     // no case '/' (also no '//' or '/*')
-    case '%': return token{symbol::MODULO, start};
+    case '%': return multi_matcher(symbol::MODULO, {{'=', symbol::MODULO_ASSIGN}}, strm, start, curr);
     case '=': return multi_matcher(symbol::ASSIGN, {{'=', symbol::EQUALS}}, strm, start, curr);
     case '!': return multi_matcher(symbol::NOT, {{'=', symbol::NOT_EQUALS}}, strm, start, curr);
     case '<': return multi_matcher(
@@ -378,10 +390,10 @@ inline token symbol_token(std::istream &strm, location &curr) {
       {{'=', symbol::GREATER_THAN_EQUALS}, {'>', symbol::SHIFT_RIGHT}},
       strm, start, curr
     );
-    case '&': return multi_matcher(symbol::BIT_AND, {{'&', symbol::AND}}, strm, start, curr);
-    case '|': return multi_matcher(symbol::BIT_OR, {{'|', symbol::OR}}, strm, start, curr);
+    case '&': return multi_matcher(symbol::BIT_AND, {{'&', symbol::AND}, {'=', symbol::BIT_AND_ASSIGN}}, strm, start, curr);
+    case '|': return multi_matcher(symbol::BIT_OR, {{'|', symbol::OR}, {'=', symbol::BIT_OR_ASSIGN}}, strm, start, curr);
     case '~': return token{symbol::BIT_NEG, start};
-    case '^': return token{symbol::XOR, start};
+    case '^': return multi_matcher(symbol::XOR, {{'=', symbol::XOR_ASSIGN}}, strm, start, curr);
     case '.': return token{symbol::DOT, start};
     case ':': return multi_matcher(symbol::COLON, {{':', symbol::NAMESPACE}}, strm, start, curr);
     case '(': return token{symbol::PAREN_OPEN, start};

@@ -14,7 +14,7 @@
 using namespace jaydk;
 using namespace jayc::lexer;
 
-inline static std::string symbols_source = "+-*/%\n++--=\n==!=<><=>=\n&&||!&|~^<<>>\n.::\n()[]{}\n,;:?";
+inline static std::string symbols_source = "+-*/%\n++--=\n==!=<><=>=\n&&||!&|~^<<>>\n.::\n()[]{}\n,;:?\n+=-=*=/=%=\n&=|=^=";
 inline static std::string keywords_source = "fun\tvar\nif else\tfor\nwhile do\treturn\nbreak continue\tnamespace\nstruct";
 inline static std::string id_keyword_source = "__ignored fun test var _name continue with2numbers3 ____";
 inline static std::string bool_literal_source = "true false";
@@ -88,10 +88,16 @@ TEST_SUITE("jayc - lexer (lexing okay)") {
       {6, 1}, {6, 2}, {6, 3}, {6, 4}, {6, 5}, {6, 6},
       // 1234
       // ,;:?
-      {7, 1}, {7, 2}, {7, 3}, {7, 4}
+      {7, 1}, {7, 2}, {7, 3}, {7, 4},
+      // 1234567890
+      // +=-=*=/=%=
+      {8, 1}, {8, 3}, {8, 5}, {8, 7}, {8, 9},
+      // 123456
+      // &=|=^=
+      {9, 1}, {9, 3}, {9, 5}
     };
 
-    for(auto s = symbol::PLUS; s <= symbol::QUESTION; ++s) {
+    for(auto s = symbol::PLUS; s <= symbol::XOR_ASSIGN; ++s) {
       REQUIRE_FALSE(lex.is_eof());
       lex >> t;
       CAPTURE(t);
@@ -102,6 +108,7 @@ TEST_SUITE("jayc - lexer (lexing okay)") {
       CHECK(t.pos.col == symbol_positions[static_cast<int>(s)].second);
     }
     CHECK_FALSE(lex.is_eof());
+    CAPTURE(t);
     lex >> t;
     CHECK(is<eof>(t.actual));
     CHECK(lex.is_eof());
@@ -486,8 +493,7 @@ TEST_SUITE("jayc - lexer (lexing okay)") {
       // 12345678901234567
       //         acc *= x;
       { .actual = identifier{"acc"}, .pos = {script, 9, 9} },
-      { .actual = symbol::MULTIPLY, .pos = {script, 9, 13} },
-      { .actual = symbol::ASSIGN, .pos = {script, 9, 14} },
+      { .actual = symbol::MULTIPLY_ASSIGN, .pos = {script, 9, 13} },
       { .actual = identifier{"x"}, .pos = {script, 9, 16} },
       { .actual = symbol::SEMI, .pos = {script, 9, 17} },
 

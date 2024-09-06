@@ -23,7 +23,10 @@ inline std::ostream &operator<<(std::ostream &target, const symbol &sym) {
 #define X(e, s) case jayc::lexer::symbol::e: return target << #e << " (`" s "`)";
 #define SYMBOLS \
   X(PLUS, "+") X(MINUS, "-") X(MULTIPLY, "*") X(DIVIDE, "/") X(MODULO, "%") \
-  X(INCREMENT, "++") X(DECREMENT, "--") X(ASSIGN, "=") \
+  X(INCREMENT, "++") X(DECREMENT, "--") \
+  X(ASSIGN, "=") X(PLUS_ASSIGN, "+=") X(MINUS_ASSIGN, "-=") X(MULTIPLY_ASSIGN, "*=")\
+  X(DIVIDE_ASSIGN, "/=") X(MODULO_ASSIGN, "%=")\
+  X(BIT_AND_ASSIGN, "&=") X(BIT_OR_ASSIGN, "|=") X(XOR_ASSIGN, "^=")\
   X(EQUALS, "==") X(NOT_EQUALS, "!=") X(LESS_THAN, "<") X(LESS_THAN_EQUALS, "<=") \
   X(GREATER_THAN, ">") X(GREATER_THAN_EQUALS, ">=") \
   X(AND, "&&") X(OR, "||") X(NOT, "!") X(BIT_AND, "&") X(BIT_OR, "|") X(BIT_NEG, "~") \
