@@ -56,6 +56,11 @@ private:
 };
 
 ast build_ast(token_it &iterator);
+std::optional<qualified_name> parse_qname(token_it &iterator);
+std::optional<type_name> parse_tname(token_it &iterator);
+std::optional<expression> parse_expr(token_it &iterator);
+std::optional<statement> parse_stmt(token_it &iterator);
+std::optional<declaration> parse_decl(token_it &iterator);
 
 template <typename Stream> requires(std::derived_from<Stream, std::istream>)
 class parser {
@@ -63,16 +68,16 @@ public:
   explicit parser(lexer::token_stream<lexer::lexer<Stream>> &&stream) : stream{std::move(stream)} {}
 
   inline ast parse() {
-    auto it = token_it([this] {
-      lexer::token t;
-      this->stream >> t;
-      return t;
-    });
+    auto it = token_it(extractor(*this));
     return build_ast(it);
   }
 
 private:
   lexer::token_stream<lexer::lexer<Stream>> stream;
+
+  static auto extractor(parser &p) {
+    return [&p] { lexer::token t; p.stream >> t; return t; };
+  }
 };
 }
 

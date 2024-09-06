@@ -9,6 +9,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <ranges>
 
 #include "util.hpp"
 
@@ -44,6 +45,15 @@ struct any_error_happened final : std::runtime_error {
 };
 
 class error_queue {
+private:
+  using msg = std::variant<info, warning, error>;
+
+  template <typename T> requires(jaydk::is_alternative_for<T, msg>)
+  [[nodiscard]] inline auto only_t() const {
+    return queue.back() |
+      std::views::filter([](const msg &x) -> bool { return jaydk::is<T>(x); }) |
+        std::views::transform([](const msg &x) -> T { return jaydk::as<T>(x); });
+  }
 public:
   error_queue(const error_queue&) = delete;
   error_queue(error_queue&&) = delete;
@@ -83,11 +93,14 @@ public:
   inline void enable_throw_on_error() { throw_on_error = true; }
   inline void disable_throw_on_error() { throw_on_error = false; }
 
+  [[nodiscard]] inline auto error_range() const { return this->only_t<error>(); }
+  [[nodiscard]] inline auto warning_range() const { return this->only_t<warning>(); }
+  [[nodiscard]] inline auto info_range() const { return this->only_t<info>(); }
+
   constexpr ~error_queue() = default;
 private:
   constexpr error_queue() : queue{std::vector<msg>{}} {}
 
-  using msg = std::variant<info, warning, error>;
   bool muted[3] = { false, false, false };
   bool throw_on_error = false;
   std::vector<std::vector<msg>> queue;
@@ -97,3 +110,4 @@ inline static error_queue &logger = error_queue::get();
 }
 
 #endif //ERROR_QUEUE_HPP
+

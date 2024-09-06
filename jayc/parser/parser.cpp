@@ -14,13 +14,13 @@ using namespace jayc::parser;
 
 // no need to check for EOF -> we use an EOF token (so any token-check will fail, return std::nullopt and bubble up)
 
-std::optional<qualified_name> parse_qname(token_it &iterator) {
+std::optional<qualified_name> jayc::parser::parse_qname(token_it &iterator) {
   // <name>(::<name>)*
   const auto [_, pos] = *iterator;
   qualified_name res{};
 
   auto token = *iterator;
-  iterator.consume();
+  iterator.consume(); // consume identifier
   if(!is<identifier>(token.actual)) {
     logger << expect("qualified name", token);
     return std::nullopt;
@@ -29,21 +29,22 @@ std::optional<qualified_name> parse_qname(token_it &iterator) {
   res.sections.push_back(as<identifier>(token.actual).ident);
   token = *iterator;
   while(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::NAMESPACE) {
-    iterator.consume();
+    iterator.consume(); // consume ::
     token = *iterator;
-    iterator.consume();
+    iterator.consume(); // consume identifier
     if(!is<identifier>(token.actual)) {
       logger << expect("qualified name", token);
       return std::nullopt;
     }
 
     res.sections.push_back(as<identifier>(token.actual).ident);
+    token = *iterator;
   }
 
   return res;
 }
 
-std::optional<type_name> parse_tname(token_it &iterator) {
+std::optional<type_name> jayc::parser::parse_tname(token_it &iterator) {
   // <qname>(< <tname>(, <tname>)* >)? ([])?
   const auto [_, pos] = *iterator;
   auto base = parse_qname(iterator);
@@ -98,6 +99,7 @@ std::optional<type_name> parse_tname(token_it &iterator) {
 
   return type_name{ .base_name = std::move(*base), .template_args = std::move(template_args), .is_array = is_array };
 }
+
 
 namespace expr_parsers {
 struct expr_pratt {
@@ -425,13 +427,14 @@ struct expr_pratt {
  * 12 -> 2  <e> || <e>
  * 13 -> 1  <e> ? <e> : <e>
  */
-std::optional<expression> parse_expr(token_it &iterator) {
-  expr_pratt local{ iterator };
-  return local.parse(0);
-}
 }
 
 using namespace expr_parsers;
+
+std::optional<expression> jayc::parser::parse_expr(token_it &iterator) {
+  expr_pratt local{ iterator };
+  return local.parse(0);
+}
 
 namespace stmt_parsers {
 template <typename T>
@@ -444,8 +447,6 @@ std::optional<T> check_semi(token_it &iterator, const T &t) {
   logger << expect("semicolon (`;`)", {a, p});
   return std::nullopt;
 }
-
-std::optional<statement> parse_stmt(token_it &iterator);
 
 constexpr std::optional<binary_op> compound_assign_op_for(const symbol s) {
   switch(s) {
@@ -783,8 +784,11 @@ std::optional<statement> parse_return_stmt(token_it &iterator) {
   }
   return check_semi(iterator, statement(return_stmt{ .value = expr }, pos));
 }
+}
 
-std::optional<statement> parse_stmt(token_it &iterator) {
+using namespace stmt_parsers;
+
+std::optional<statement> jayc::parser::parse_stmt(token_it &iterator) {
   // ignore empty statements
   while(is<symbol>(iterator->actual) && as<symbol>(iterator->actual) == symbol::SEMI) {
     iterator.consume();
@@ -832,12 +836,8 @@ std::optional<statement> parse_stmt(token_it &iterator) {
 
   return parse_initial_expr_stmt(iterator);
 }
-}
-
-using namespace stmt_parsers;
 
 namespace decl_parsers {
-std::optional<declaration> parse_decl(token_it &iterator);
 
 std::optional<declaration> parse_fun_decl(token_it &iterator) {
   // fun (<type>.)?<name>((<type> <name>(, <type> <name>)*)?) { <body> }
@@ -1153,8 +1153,11 @@ std::optional<declaration> parse_typed_glob_decl(token_it &iterator) {
     pos
   ) | maybe{};
 }
+}
 
-std::optional<declaration> parse_decl(token_it &iterator) {
+using namespace decl_parsers;
+
+std::optional<declaration> jayc::parser::parse_decl(token_it &iterator) {
   const auto &[actual, pos] = *iterator;
 
   if(is<identifier>(actual)) {
@@ -1184,9 +1187,6 @@ std::optional<declaration> parse_decl(token_it &iterator) {
     return std::nullopt;
   }
 }
-}
-
-using namespace decl_parsers;
 
 ast jayc::parser::build_ast(token_it &iterator) {
   ast result;

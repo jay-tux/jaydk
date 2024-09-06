@@ -4,7 +4,8 @@ project(jayc_test)
 set(CMAKE_CXX_STANDARD 20)
 
 add_executable(jayc_test main.cpp
-        lexer_test.cpp)
+        lexer_test.cpp
+        parser_test.cpp)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTEST_SOURCE='\"${CMAKE_CURRENT_SOURCE_DIR}\"'")
 
