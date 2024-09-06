@@ -73,6 +73,11 @@ struct call_expr {
   std::vector<expression> args;
 };
 
+struct index_expr {
+  jaydk::managed<expression> base;
+  jaydk::managed<expression> index;
+};
+
 struct member_expr {
   jaydk::managed<expression> base;
   std::string member;
@@ -82,7 +87,7 @@ struct expression : node {
   using actual_t = std::variant<
     literal_expr<int64_t>, literal_expr<uint64_t>, literal_expr<float>, literal_expr<double>,
     literal_expr<char>, literal_expr<std::string>, literal_expr<bool>, name_expr,
-    unary_expr, binary_expr, ternary_expr, call_expr, member_expr
+    unary_expr, binary_expr, ternary_expr, call_expr, index_expr, member_expr
   >;
 
   template <typename T> requires(jaydk::is_alternative_for<T, actual_t>)

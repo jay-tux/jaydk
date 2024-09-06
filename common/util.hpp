@@ -79,10 +79,34 @@ constexpr std::optional<std::invoke_result_t<F, X>> operator|(const std::optiona
   return std::nullopt;
 }
 
+namespace internal_ {
+template <typename T> struct is_optional : std::false_type {};
+template <typename T> struct is_optional<std::optional<T>> : std::true_type {};
+}
+
+template <typename F, typename X> requires(std::invocable<F, const X &> && internal_::is_optional<std::invoke_result_t<F, const X &>>::value)
+constexpr std::invoke_result_t<F, const X &> operator>>(const std::optional<X> &opt, F &&f) {
+  if(opt.has_value()) return f(*opt);
+  return std::nullopt;
+}
+
 struct maybe{};
 
 template <typename X>
 constexpr std::optional<X> operator|(const X &x, maybe) { return x; }
+
+template <typename X>
+constexpr std::optional<X> operator||(const std::optional<X> &orig, const std::optional<X> &other) {
+  if(orig.has_value()) return orig;
+  return other;
+}
+
+template <typename X, typename Y>
+std::optional<std::pair<X, Y>> merge(const std::optional<X> &x, const std::optional<Y> &y) {
+  if(!x.has_value()) return std::nullopt;
+  if(!y.has_value()) return std::nullopt;
+  return std::pair{*x, *y};
+}
 }
 
 #endif //UTIL_HPP

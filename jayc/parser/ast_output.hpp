@@ -108,6 +108,24 @@ struct expr_printer {
     target << indent{i} << "access to member `" << m.member << "` (at " << pos << ")\n";
     print_expr(target, *m.base, i + 1);
   }
+
+  inline void operator()(std::ostream &target, const ternary_expr &t, const location &pos, const size_t i) const {
+    target << indent{i} << "ternary operator (at " << pos << ")\n";
+    target << indent{i + 1} << "condition:\n";
+    print_expr(target, *t.cond, i + 2);
+    target << indent{i + 1} << "true branch:\n";
+    print_expr(target, *t.true_expr, i + 2);
+    target << indent{i + 1} << "false branch:\n";
+    print_expr(target, *t.false_expr, i + 2);
+  }
+
+  inline void operator()(std::ostream &target, const index_expr &ie, const location &pos, const size_t i) const {
+    target << indent{i} << "indexing (at " << pos << ")\n";
+    target << indent{i + 1} << "base:\n";
+    print_expr(target, *ie.base, i + 2);
+    target << indent{i + 1} << "index:\n";
+    print_expr(target, *ie.index, i + 2);
+  }
 };
 
 inline void print_expr(std::ostream &target, const expression &e, size_t i) {
@@ -267,11 +285,11 @@ struct decl_printer {
     }
 
     target << indent{i + 1} << "with " << t.fields.size() << " member field(s):\n";
-    for(const auto &[t, n, init, p]: t.fields) {
-      target << indent{i + 2} << t << " " << n << " (at " << p << ")";
-      if(init.has_value()) {
+    for(const auto &[tgd, p]: t.fields) {
+      target << indent{i + 2} << tgd.type << " " << tgd.name << " (at " << p << ")";
+      if(tgd.initial.has_value()) {
         target << "; with initial value:\n";
-        print_expr(target, *init, i + 3);
+        print_expr(target, *tgd.initial, i + 3);
       }
       else {
         target << "\n";
@@ -292,6 +310,17 @@ struct decl_printer {
   inline void operator()(std::ostream &target, const global_decl &g, const location &pos, const size_t i) const {
     target << indent{i} << "declaration of global variable `" << g.name << "` (at " << pos << "); with initial value:\n";
     print_expr(target, g.value, i + 1);
+  }
+
+  inline void operator()(std::ostream &target, const typed_global_decl &t, const location &pos, const size_t i) const {
+    target << indent{i} << "declaration of global variable `" << t.name << "` with type `" << t.type << "` (at " << pos << ")";
+    if(t.initial.has_value()) {
+      target << "; with initial value:\n";
+      print_expr(target, *t.initial, i + 1);
+    }
+    else {
+      target << "\n";
+    }
   }
 };
 

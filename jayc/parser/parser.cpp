@@ -2,6 +2,7 @@
 // Created by jay on 9/5/24.
 //
 
+#include "util.hpp"
 #include "parser.hpp"
 #include "ast.hpp"
 #include "parse_error.hpp"
@@ -103,40 +104,326 @@ namespace expr_parsers {
 struct expr_pratt {
   token_it &iterator;
 
-  expression parse(uint8_t precedence) {
-    auto token = *iterator;
+  template <typename T>
+  std::optional<expression> lit_expr_helper(const token &t) {
+    if(is<literal<T>>(t.actual)) return expression(literal_expr<T>(as<literal<T>>(t.actual).value), t.pos);
+    return std::nullopt;
+  }
 
-    expression initial(literal_expr<int64_t>(0), location{});
+  std::optional<expression> literal_to_expr(const token &t) {
+    return lit_expr_helper<int64_t>(t) || lit_expr_helper<uint64_t>(t) || lit_expr_helper<float>(t) ||
+           lit_expr_helper<double>(t) || lit_expr_helper<char>(t) || lit_expr_helper<std::string>(t) ||
+           lit_expr_helper<bool>(t);
+  }
+
+  constexpr static uint8_t precedence_for(const token_t &t) {
+    if(!is<symbol>(t)) return 0;
+    switch(as<symbol>(t)) {
+      using enum symbol;
+      case INCREMENT:
+      case DECREMENT:
+      case PAREN_OPEN:
+      case BRACKET_OPEN:
+      case DOT:
+        return 12;
+
+      case MULTIPLY:
+      case DIVIDE:
+      case MODULO:
+        return 11;
+
+      case PLUS:
+      case MINUS:
+        return 10;
+
+      case SHIFT_LEFT:
+      case SHIFT_RIGHT:
+        return 9;
+
+      case LESS_THAN:
+      case GREATER_THAN:
+      case LESS_THAN_EQUALS:
+      case GREATER_THAN_EQUALS:
+        return 8;
+
+      case EQUALS:
+      case NOT_EQUALS:
+        return 7;
+
+      case BIT_AND:
+        return 6;
+
+      case XOR:
+        return 5;
+
+      case BIT_OR:
+        return 4;
+
+      case AND:
+        return 3;
+
+      case OR:
+        return 2;
+
+      case QUESTION:
+      case COLON:
+        return 1;
+
+      default:
+        return 0;
+    }
+  }
+
+  constexpr static bool is_prefix(const symbol s) {
+    switch(s) {
+      using enum symbol;
+      case PLUS:
+      case MINUS:
+      case INCREMENT:
+      case DECREMENT:
+      case NOT:
+      case BIT_NEG:
+      case PAREN_OPEN: // also required to distinguish (<expr>) from <expr>(<exprs>)
+        return true;
+
+      default:
+        return false;
+    }
+    return false;
+  }
+
+  constexpr static bool is_postfix(const symbol s) {
+    switch(s) {
+      using enum symbol;
+      case INCREMENT:
+      case DECREMENT:
+        return true;
+
+      default:
+        return false;
+    }
+  }
+
+  constexpr static std::optional<unary_op> un_op_for(const symbol s) {
+    switch(s) {
+      using enum symbol;
+      case PLUS: return unary_op::UN_PLUS;
+      case MINUS: return unary_op::UN_MINUS;
+      case INCREMENT: return unary_op::PRE_INCR;
+      case DECREMENT: return unary_op::PRE_DECR;
+      case NOT: return unary_op::BOOL_NEG;
+      case BIT_NEG: return unary_op::BIT_NEG;
+      default: return std::nullopt;
+    }
+  }
+
+  constexpr static std::optional<binary_op> bin_op_for(const symbol s) {
+    switch(s) {
+      case symbol::MULTIPLY: return binary_op::MULTIPLY;
+      case symbol::DIVIDE: return binary_op::DIVIDE;
+      case symbol::MODULO: return binary_op::MODULO;
+      case symbol::PLUS: return binary_op::ADD;
+      case symbol::MINUS: return binary_op::SUBTRACT;
+      case symbol::SHIFT_LEFT: return binary_op::SHIFT_LEFT;
+      case symbol::SHIFT_RIGHT: return binary_op::SHIFT_RIGHT;
+      case symbol::LESS_THAN: return binary_op::LESS;
+      case symbol::GREATER_THAN: return binary_op::GREATER;
+      case symbol::LESS_THAN_EQUALS: return binary_op::LESS_EQUAL;
+      case symbol::GREATER_THAN_EQUALS: return binary_op::GREATER_EQUAL;
+      case symbol::EQUALS: return binary_op::EQUAL;
+      case symbol::NOT_EQUALS: return binary_op::NOT_EQUAL;
+      case symbol::BIT_AND: return binary_op::BIT_AND;
+      case symbol::BIT_OR: return binary_op::BIT_OR;
+      case symbol::XOR: return binary_op::XOR;
+      case symbol::AND: return binary_op::BOOL_AND;
+      case symbol::OR: return binary_op::BOOL_OR;
+
+      default: return std::nullopt;
+    }
+  }
+
+  std::optional<expression> parse_prefix(symbol s, const location &loc) {
+    if(s == symbol::PAREN_OPEN) {
+      // handle special case separately
+      auto res = parse(0); // precedence 0 -> stop on ) or invalid token
+      auto token = *iterator;
+      iterator.consume();
+      if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::PAREN_CLOSE) {
+        logger << expect("closing parenthesis (`)`)", token);
+        return std::nullopt;
+      }
+      return res;
+    }
+
+    return merge(parse(precedence_for(s)), un_op_for(s)) | [&loc](const std::pair<expression, unary_op> &pair) {
+      return expression(unary_expr{ .op = pair.second, .expr = alloc(pair.first) }, loc);
+    };
+  }
+
+  std::optional<expression> parse_infix(const expression &left, const symbol s, const location &loc) {
+    token token;
+    switch(s) {
+      case symbol::PAREN_OPEN: {
+        // special case #1 -> functor call
+        std::vector<expression> args;
+        while(!iterator.eof()) {
+          auto arg = parse(0); // precedence 0 -> stop on non-operator
+          if(!arg.has_value()) return std::nullopt;
+          args.emplace_back(std::move(*arg));
+
+          token = *iterator;
+          iterator.consume();
+          if(is<symbol>(token.actual)) {
+            if(as<symbol>(token.actual) == symbol::PAREN_CLOSE) break;
+            if(as<symbol>(token.actual) != symbol::COMMA) {
+              logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
+              return std::nullopt;
+            }
+          }
+          else {
+            logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
+            return std::nullopt;
+          }
+        }
+
+        return expression(call_expr{ .call = alloc(left), .args = std::move(args) }, loc);
+      }
+
+      case symbol::BRACKET_OPEN: {
+        // special case #2 -> array access
+        auto idx = parse(0); // precedence 0 -> stop on non-operator
+        if(!idx.has_value()) return std::nullopt;
+
+        token = *iterator;
+        iterator.consume();
+        if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACKET_CLOSE) {
+          logger << expect("closing bracket (`]`) after array index", token);
+          return std::nullopt;
+        }
+
+        return expression(index_expr{ .base = alloc(left), .index = alloc(*idx) }, loc);
+      }
+
+      case symbol::DOT: {
+        // special case #3 -> member access
+        token = *iterator;
+        iterator.consume();
+        if(!is<identifier>(token.actual)) {
+          logger << expect_identifier({token.actual, token.pos});
+          return std::nullopt;
+        }
+        return expression(member_expr{ .base = alloc(left), .member = as<identifier>(token.actual).ident }, loc);
+      }
+
+      case symbol::QUESTION: {
+        iterator.consume();
+        const auto b_true = parse(0);
+        if(!b_true.has_value()) return std::nullopt;
+        token = *iterator;
+        iterator.consume();
+        if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::COLON) {
+          logger << expect("colon (`:`)", token);
+          return std::nullopt;
+        }
+
+        const auto b_false = parse(0);
+        if(!b_false.has_value()) return std::nullopt;
+        return expression(ternary_expr{ .cond = alloc(left), .true_expr = alloc(*b_true), .false_expr = alloc(*b_false) }, loc);
+      }
+
+      case symbol::INCREMENT:
+      case symbol::DECREMENT: {
+        // special case #4 -> postfix operators
+        return expression(unary_expr{ .op = s == symbol::INCREMENT ? unary_op::PRE_INCR : unary_op::PRE_DECR, .expr = alloc(left) }, loc);
+      }
+
+      case symbol::MULTIPLY:
+      case symbol::DIVIDE:
+      case symbol::MODULO:
+      case symbol::PLUS:
+      case symbol::MINUS:
+      case symbol::SHIFT_LEFT:
+      case symbol::SHIFT_RIGHT:
+      case symbol::LESS_THAN:
+      case symbol::GREATER_THAN:
+      case symbol::LESS_THAN_EQUALS:
+      case symbol::GREATER_THAN_EQUALS:
+      case symbol::EQUALS:
+      case symbol::NOT_EQUALS:
+      case symbol::BIT_AND:
+      case symbol::BIT_OR:
+      case symbol::XOR:
+      case symbol::AND:
+      case symbol::OR: {
+        return merge(parse(precedence_for(s)), bin_op_for(s)) | [&loc, &left](const std::pair<expression, binary_op> &pair) {
+          return expression(binary_expr{ .op = pair.second, .left = alloc(left), .right = alloc(pair.first) }, loc);
+        };
+      }
+
+      default: {
+        logger << expect("binary or postfix operator", ::token{s, loc});
+        return std::nullopt;
+      }
+    }
+  }
+
+  std::optional<expression> parse(const uint8_t precedence) {
+    auto token = *iterator;
+    iterator.consume();
+
+    std::optional<expression> left = literal_to_expr(token);
     if(is<identifier>(token.actual)) {
       auto qname = parse_qname(iterator);
       if(!qname.has_value()) {
         logger << expect("qualified name", token);
-        return initial;
+        return left;
       }
-      initial = expression(name_expr{ std::move(*qname) }, token.pos);
+      left = expression(name_expr{ std::move(*qname) }, token.pos);
     }
+    else if(is<symbol>(token.actual) && is_prefix(as<symbol>(token.actual))) {
+      left = parse_prefix(as<symbol>(token.actual), token.pos);
+    }
+
+    if(!left.has_value()) {
+      logger << expect("expression", token);
+      return std::nullopt;
+    }
+
+    token = *iterator;
+    while(precedence_for(token.actual) > precedence) {
+      if(!is<symbol>(token.actual)) break; // TODO: check if is error?
+      iterator.consume();
+
+      left = parse_infix(*left, as<symbol>(token.actual), token.pos);
+      if(!left.has_value()) return std::nullopt;
+
+      token = *iterator;
+    }
+
+    return left;
   }
 };
 
 /*
  * --- precedence ---
  * 1  a::b::c (via parse_qname)
- * 2 	<e>++         <e>--         <e>()         <e>[]         <e>.a
- * 3  ++<e>         --<e>         +<e>          -<e>          ~<e>          !<e>
- * 4  <e>*<e>       <e>/<e>       <e>%<e>
- * 5  <e>+<e>       <e>-<e>
- * 6  <e> << <e>    <e> >> <e>
- * 7  <e> < <e>     <e> > <e>     <e> <= <e>    <e> >= <e>
- * 8  <e> == <e>    <e> != <e>
- * 9  <e> & <e>
- * 10 <e> ^ <e>
- * 11 <e> | <e>
- * 12 <e> && <e>
- * 13 <e> || <e>
- * 14 <e> ? <e> : <e>
+ * 2 	-> 12 <e>++         <e>--         <e>()         <e>[]         <e>.a
+ *          ++<e>         --<e>         +<e>          - <e>         ~<e>          !<e>
+ * 3  -> 11 <e>*<e>       <e>/<e>       <e>%<e>
+ * 4  -> 10 <e>+<e>       <e>-<e>
+ * 5  -> 9  <e> << <e>    <e> >> <e>
+ * 6  -> 8  <e> < <e>     <e> > <e>     <e> <= <e>    <e> >= <e>
+ * 7  -> 7  <e> == <e>    <e> != <e>
+ * 8  -> 6  <e> & <e>
+ * 9  -> 5  <e> ^ <e>
+ * 10 -> 4  <e> | <e>
+ * 11 -> 3  <e> && <e>
+ * 12 -> 2  <e> || <e>
+ * 13 -> 1  <e> ? <e> : <e>
  */
 std::optional<expression> parse_expr(token_it &iterator) {
-  return std::nullopt;
+  expr_pratt local{ iterator };
+  return local.parse(0);
 }
 }
 
@@ -849,8 +1136,8 @@ std::optional<declaration> parse_typed_glob_decl(token_it &iterator) {
 
   return declaration(
     typed_global_decl{
-      .name = name,
       .type = *type,
+      .name = name,
       .initial = initial
     },
     pos
