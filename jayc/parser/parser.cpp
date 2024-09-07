@@ -100,7 +100,6 @@ std::optional<type_name> jayc::parser::parse_tname(token_it &iterator) {
   return type_name{ .base_name = std::move(*base), .template_args = std::move(template_args), .is_array = is_array };
 }
 
-
 namespace expr_parsers {
 struct expr_pratt {
   token_it &iterator;
@@ -167,7 +166,6 @@ struct expr_pratt {
         return 2;
 
       case QUESTION:
-      case COLON:
         return 1;
 
       default:
@@ -191,18 +189,6 @@ struct expr_pratt {
         return false;
     }
     return false;
-  }
-
-  constexpr static bool is_postfix(const symbol s) {
-    switch(s) {
-      using enum symbol;
-      case INCREMENT:
-      case DECREMENT:
-        return true;
-
-      default:
-        return false;
-    }
   }
 
   constexpr static std::optional<unary_op> un_op_for(const symbol s) {
@@ -267,24 +253,30 @@ struct expr_pratt {
       case symbol::PAREN_OPEN: {
         // special case #1 -> functor call
         std::vector<expression> args;
-        while(!iterator.eof()) {
-          auto arg = parse(0); // precedence 0 -> stop on non-operator
-          if(!arg.has_value()) return std::nullopt;
-          args.emplace_back(std::move(*arg));
 
-          token = *iterator;
-          iterator.consume();
-          if(is<symbol>(token.actual)) {
-            if(as<symbol>(token.actual) == symbol::PAREN_CLOSE) break;
-            if(as<symbol>(token.actual) != symbol::COMMA) {
+        if(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::PAREN_CLOSE) {
+          while(!iterator.eof()) {
+            auto arg = parse(0); // precedence 0 -> stop on non-operator
+            if(!arg.has_value()) return std::nullopt;
+            args.emplace_back(std::move(*arg));
+
+            token = *iterator;
+            iterator.consume();
+            if(is<symbol>(token.actual)) {
+              if(as<symbol>(token.actual) == symbol::PAREN_CLOSE) break;
+              if(as<symbol>(token.actual) != symbol::COMMA) {
+                logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
+                return std::nullopt;
+              }
+            }
+            else {
               logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
               return std::nullopt;
             }
           }
-          else {
-            logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
-            return std::nullopt;
-          }
+        }
+        else {
+          iterator.consume();
         }
 
         return expression(call_expr{ .call = alloc(left), .args = std::move(args) }, loc);
@@ -317,7 +309,6 @@ struct expr_pratt {
       }
 
       case symbol::QUESTION: {
-        iterator.consume();
         const auto b_true = parse(0);
         if(!b_true.has_value()) return std::nullopt;
         token = *iterator;
@@ -335,7 +326,7 @@ struct expr_pratt {
       case symbol::INCREMENT:
       case symbol::DECREMENT: {
         // special case #4 -> postfix operators
-        return expression(unary_expr{ .op = s == symbol::INCREMENT ? unary_op::PRE_INCR : unary_op::PRE_DECR, .expr = alloc(left) }, loc);
+        return expression(unary_expr{ .op = s == symbol::INCREMENT ? unary_op::POST_INCR : unary_op::POST_DECR, .expr = alloc(left) }, loc);
       }
 
       case symbol::MULTIPLY:

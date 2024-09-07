@@ -35,6 +35,10 @@ struct qualified_name {
 
 struct type_name {
   // tname: <qname>(<<tname>(,<tname>)*>)?([])?
+  // TODO: update to be:
+  //    tname: <tname_no_arr> ([])?
+  //    tname_no_arr: <qname>(<<tname>(, <tname>)*>(::<tname_no_arr>)?)?
+  // (for things like std::vector<std::string>::iterator;
   qualified_name base_name;
   std::vector<type_name> template_args;
   bool is_array;
