@@ -938,7 +938,223 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       // (look, I know it's a senseless expression, but oh well... it's a nice nested test-case)
       // make_call() ? arr[12 - other_var] * 5 : std::test(_internal::arr()[6]) ? true * 12 : false << 14;
       // TODO
-      const vec_source source({});
+      const vec_source source({
+        {identifier{"make_call"}, {}}, {symbol::PAREN_OPEN, {}},
+        {symbol::PAREN_CLOSE, {}}, {symbol::QUESTION, {}}, {identifier{"arr"}, {}},
+        {symbol::BRACKET_OPEN, {}}, {literal<int64_t>{12}, {}},
+        {symbol::MINUS, {}}, {identifier{"other_var"}, {}}, {symbol::BRACKET_CLOSE, {}},
+        {symbol::MULTIPLY, {}}, {literal<int64_t>{5}, {}}, {symbol::COLON, {}},
+        {identifier{"std"}, {}}, {symbol::NAMESPACE, {}}, {identifier{"test"}, {}},
+        {symbol::PAREN_OPEN, {}}, {identifier{"_internal"}, {}}, {symbol::NAMESPACE, {}},
+        {identifier{"arr"}, {}}, {symbol::PAREN_OPEN, {}}, {symbol::PAREN_CLOSE, {}},
+        {symbol::BRACKET_OPEN, {}}, {literal<int64_t>{6}, {}}, {symbol::BRACKET_CLOSE, {}},
+        {symbol::PAREN_CLOSE, {}}, {symbol::QUESTION, {}}, {literal{true}, {}},
+        {symbol::MULTIPLY, {}}, {literal<int64_t>{12}, {}}, {symbol::COLON, {}},
+        {literal{false}, {}}, {symbol::SHIFT_LEFT, {}}, {literal<int64_t>{14}, {}}
+      });
+
+      auto it = token_it(source);
+      auto res = parse_expr(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<ternary_expr>(res->content));
+      const auto &root = as<ternary_expr>(res->content);
+
+      REQUIRE(is<call_expr>(root.cond->content));
+      const auto &make_call = as<call_expr>(root.cond->content);
+      REQUIRE(is<name_expr>(make_call.call->content));
+      CHECK(as<name_expr>(make_call.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(make_call.call->content).name.sections[0] == "make_call");
+      CHECK(make_call.args.empty());
+
+      REQUIRE(is<binary_expr>(root.true_expr->content));
+      const auto &true_expr = as<binary_expr>(root.true_expr->content);
+
+      REQUIRE(is<index_expr>(true_expr.left->content));
+      const auto &arr = as<index_expr>(true_expr.left->content);
+      REQUIRE(is<name_expr>(arr.base->content));
+      const auto &arr_name = as<name_expr>(arr.base->content);
+      CHECK(arr_name.name.sections.size() == 1);
+      CHECK(arr_name.name.sections[0] == "arr");
+
+      REQUIRE(is<binary_expr>(arr.index->content));
+      const auto &arr_minus = as<binary_expr>(arr.index->content);
+      REQUIRE(is<literal_expr<int64_t>>(arr_minus.left->content));
+      CHECK(as<literal_expr<int64_t>>(arr_minus.left->content).value == 12);
+
+      REQUIRE(is<name_expr>(arr_minus.right->content));
+      const auto &other_var = as<name_expr>(arr_minus.right->content);
+      CHECK(other_var.name.sections.size() == 1);
+      CHECK(other_var.name.sections[0] == "other_var");
+
+      CHECK(arr_minus.op == binary_op::SUBTRACT);
+
+      REQUIRE(is<literal_expr<int64_t>>(true_expr.right->content));
+      CHECK(as<literal_expr<int64_t>>(true_expr.right->content).value == 5);
+
+      CHECK(true_expr.op == binary_op::MULTIPLY);
+
+      REQUIRE(is<ternary_expr>(root.false_expr->content));
+      const auto &false_expr = as<ternary_expr>(root.false_expr->content);
+
+      REQUIRE(is<call_expr>(false_expr.cond->content));
+      const auto &std_test_call = as<call_expr>(false_expr.cond->content);
+      REQUIRE(is<name_expr>(std_test_call.call->content));
+      const auto &std_test = as<name_expr>(std_test_call.call->content);
+      CHECK(std_test.name.sections.size() == 2);
+      CHECK(std_test.name.sections[0] == "std");
+      CHECK(std_test.name.sections[1] == "test");
+
+      REQUIRE(std_test_call.args.size() == 1);
+      REQUIRE(is<index_expr>(std_test_call.args[0].content));
+      const auto &internal_arr_indexing = as<index_expr>(std_test_call.args[0].content);
+
+      REQUIRE(is<call_expr>(internal_arr_indexing.base->content));
+      const auto &internal_arr_call = as<call_expr>(internal_arr_indexing.base->content);
+      REQUIRE(is<name_expr>(internal_arr_call.call->content));
+      const auto &internal_arr = as<name_expr>(internal_arr_call.call->content);
+      CHECK(internal_arr.name.sections.size() == 2);
+      CHECK(internal_arr.name.sections[0] == "_internal");
+      CHECK(internal_arr.name.sections[1] == "arr");
+      CHECK(internal_arr_call.args.empty());
+
+      REQUIRE(is<literal_expr<int64_t>>(internal_arr_indexing.index->content));
+      CHECK(as<literal_expr<int64_t>>(internal_arr_indexing.index->content).value == 6);
+
+      REQUIRE(is<binary_expr>(false_expr.true_expr->content));
+      const auto &bool_mul_expr = as<binary_expr>(false_expr.true_expr->content);
+      REQUIRE(is<literal_expr<bool>>(bool_mul_expr.left->content));
+      CHECK(as<literal_expr<bool>>(bool_mul_expr.left->content).value == true); // compare to true for clarity and uniformity with other literals
+      REQUIRE(is<literal_expr<int64_t>>(bool_mul_expr.right->content));
+      CHECK(as<literal_expr<int64_t>>(bool_mul_expr.right->content).value == 12);
+
+      CHECK(bool_mul_expr.op == binary_op::MULTIPLY);
+
+      REQUIRE(is<binary_expr>(false_expr.false_expr->content));
+      const auto &bool_shift_expr = as<binary_expr>(false_expr.false_expr->content);
+      REQUIRE(is<literal_expr<bool>>(bool_shift_expr.left->content));
+      CHECK(as<literal_expr<bool>>(bool_shift_expr.left->content).value == false); // compare to false for clarity and uniformity with other literals
+      REQUIRE(is<literal_expr<int64_t>>(bool_shift_expr.right->content));
+      CHECK(as<literal_expr<int64_t>>(bool_shift_expr.right->content).value == 14);
+
+      CHECK(bool_shift_expr.op == binary_op::SHIFT_LEFT);
+
+      CHECK(is<eof>(it->actual));
+    }
+
+    SUBCASE("Bernouilli") {
+      // 1.0f/(1 + x*x) == 1.0f/2 * (1 / (1 - i * x) + 1 / (1 + i * x))
+      const vec_source source({
+        {literal{1.0f}, {}}, {symbol::DIVIDE, {}}, {symbol::PAREN_OPEN, {}}, {literal<int64_t>{1}, {}},
+        {symbol::PLUS, {}}, {identifier{"x"}, {}}, {symbol::MULTIPLY, {}}, {identifier{"x"}, {}},
+        {symbol::PAREN_CLOSE, {}}, {symbol::EQUALS, {}}, {literal{1.0f}, {}}, {symbol::DIVIDE, {}},
+        {literal<int64_t>{2}, {}}, {symbol::MULTIPLY, {}}, {symbol::PAREN_OPEN, {}}, {literal<int64_t>{1}, {}},
+        {symbol::DIVIDE, {}}, {symbol::PAREN_OPEN, {}}, {literal<int64_t>{1}, {}}, {symbol::MINUS, {}},
+        {identifier{"i"}, {}}, {symbol::MULTIPLY, {}}, {identifier{"x"}, {}}, {symbol::PAREN_CLOSE, {}},
+        {symbol::PLUS, {}}, {literal<int64_t>{1}, {}}, {symbol::DIVIDE, {}}, {symbol::PAREN_OPEN, {}},
+        {literal<int64_t>{1}, {}}, {symbol::PLUS, {}}, {identifier{"i"}, {}}, {symbol::MULTIPLY, {}},
+        {identifier{"x"}, {}}, {symbol::PAREN_CLOSE, {}}, {symbol::PAREN_CLOSE, {}}
+      });
+
+      auto it = token_it(source);
+      auto res = parse_expr(it);
+
+      constexpr static auto is_bin = [](const expression &x) { return is<binary_expr>(x.content); };
+      constexpr static auto as_bin = [](const expression &x) { return as<binary_expr>(x.content); };
+      constexpr static auto is_i_lit = [](const expression &x) { return is<literal_expr<int64_t>>(x.content); };
+      constexpr static auto as_i_lit = [](const expression &x) { return as<literal_expr<int64_t>>(x.content); };
+      constexpr static auto is_f_lit = [](const expression &x) { return is<literal_expr<float>>(x.content); };
+      constexpr static auto as_f_lit = [](const expression &x) { return as<literal_expr<float>>(x.content); };
+      constexpr static auto is_name = [](const expression &x) { return is<name_expr>(x.content); };
+      constexpr static auto as_name = [](const expression &x) { return as<name_expr>(x.content); };
+
+      REQUIRE(res.has_value());
+      REQUIRE(is_bin(*res));
+      const auto &cmp_eq = as_bin(*res);
+      CHECK(cmp_eq.op == binary_op::EQUAL);
+
+      // 1.0f/(1 + x*x)
+      REQUIRE(is_bin(*cmp_eq.left));
+      const auto &div1 = as_bin(*cmp_eq.left);
+      CHECK(div1.op == binary_op::DIVIDE);
+      REQUIRE(is_f_lit(*div1.left));
+      CHECK(as_f_lit(*div1.left).value == 1.0f);
+      //   1 + x*x
+      REQUIRE(is_bin(*div1.right));
+      const auto &add1 = as_bin(*div1.right);
+      CHECK(add1.op == binary_op::ADD);
+      REQUIRE(is_i_lit(*add1.left));
+      CHECK(as_i_lit(*add1.left).value == 1);
+      //    x*x
+      REQUIRE(is_bin(*add1.right));
+      const auto &mul1 = as_bin(*add1.right);
+      CHECK(mul1.op == binary_op::MULTIPLY);
+      REQUIRE(is_name(*mul1.left));
+      CHECK(as_name(*mul1.left).name.sections.size() == 1);
+      CHECK(as_name(*mul1.left).name.sections[0] == "x");
+      REQUIRE(is_name(*mul1.right));
+      CHECK(as_name(*mul1.right).name.sections.size() == 1);
+      CHECK(as_name(*mul1.right).name.sections[0] == "x");
+
+      // 1.0f/2 * (1 / (1 - i * x) + 1 / (1 + i * x))
+      REQUIRE(is_bin(*cmp_eq.right));
+      const auto &mul2 = as_bin(*cmp_eq.right);
+      CHECK(mul2.op == binary_op::MULTIPLY);
+      //    1.0f/2
+      REQUIRE(is_bin(*mul2.left));
+      const auto &div2 = as_bin(*mul2.left);
+      CHECK(div2.op == binary_op::DIVIDE);
+      REQUIRE(is_f_lit(*div2.left));
+      CHECK(as_f_lit(*div2.left).value == 1.0f);
+      REQUIRE(is_i_lit(*div2.right));
+      CHECK(as_i_lit(*div2.right).value == 2);
+      //    (1 / (1 - i * x) + 1 / (1 + i * x))
+      REQUIRE(is_bin(*mul2.right));
+      const auto &add2 = as_bin(*mul2.right);
+      CHECK(add2.op == binary_op::ADD);
+      //        1 / (1 - i * x)
+      REQUIRE(is_bin(*add2.left));
+      const auto &div3 = as_bin(*add2.left);
+      CHECK(div3.op == binary_op::DIVIDE);
+      REQUIRE(is_i_lit(*div3.left));
+      CHECK(as_i_lit(*div3.left).value == 1);
+      //            1 - i * x
+      REQUIRE(is_bin(*div3.right));
+      const auto &sub1 = as_bin(*div3.right);
+      CHECK(sub1.op == binary_op::SUBTRACT);
+      REQUIRE(is_i_lit(*sub1.left));
+      CHECK(as_i_lit(*sub1.left).value == 1);
+      //                i * x
+      REQUIRE(is_bin(*sub1.right));
+      const auto &mul3 = as_bin(*sub1.right);
+      CHECK(mul3.op == binary_op::MULTIPLY);
+      REQUIRE(is_name(*mul3.left));
+      CHECK(as_name(*mul3.left).name.sections.size() == 1);
+      CHECK(as_name(*mul3.left).name.sections[0] == "i");
+      REQUIRE(is_name(*mul3.right));
+      CHECK(as_name(*mul3.right).name.sections.size() == 1);
+      CHECK(as_name(*mul3.right).name.sections[0] == "x");
+      //        1 / (1 + i * x)
+      REQUIRE(is_bin(*add2.right));
+      const auto &div4 = as_bin(*add2.right);
+      CHECK(div4.op == binary_op::DIVIDE);
+      REQUIRE(is_i_lit(*div4.left));
+      CHECK(as_i_lit(*div4.left).value == 1);
+      //            1 + i * x
+      REQUIRE(is_bin(*div4.right));
+      const auto &add3 = as_bin(*div4.right);
+      CHECK(add3.op == binary_op::ADD);
+      REQUIRE(is_i_lit(*add3.left));
+      CHECK(as_i_lit(*add3.left).value == 1);
+      //                i * x
+      REQUIRE(is_bin(*add3.right));
+      const auto &mul4 = as_bin(*add3.right);
+      CHECK(mul4.op == binary_op::MULTIPLY);
+      REQUIRE(is_name(*mul4.left));
+      CHECK(as_name(*mul4.left).name.sections.size() == 1);
+      CHECK(as_name(*mul4.left).name.sections[0] == "i");
+      REQUIRE(is_name(*mul4.right));
+      CHECK(as_name(*mul4.right).name.sections.size() == 1);
+      CHECK(as_name(*mul4.right).name.sections[0] == "x");
     }
   }
 
