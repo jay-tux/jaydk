@@ -138,7 +138,7 @@ struct if_stmt {
 struct for_stmt {
   jaydk::managed<statement> init;
   expression condition;
-  expression update;
+  expression update; // TODO: convert to statement (x++ works, but x += 2 doesn't) -> requires moving assignment to expressions
   jaydk::managed<statement> block;
 };
 
@@ -151,7 +151,7 @@ struct for_each_stmt {
 struct while_stmt {
   bool is_do_while = false;
   expression condition;
-  std::vector<statement> block;
+  jaydk::managed<statement> block;
 };
 
 struct break_stmt {};

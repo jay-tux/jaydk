@@ -382,6 +382,7 @@ struct expr_pratt {
     }
 
     if(!left.has_value()) {
+      logger << warning{iterator->pos, "EH? (*iterator=" + token_type(*iterator)};
       logger << expect("expression", token);
       return std::nullopt;
     }
@@ -627,6 +628,7 @@ std::optional<statement> parse_for_stmt(token_it &iterator) {
       logger << expect("closing parenthesis (`)`)", token);
       return std::nullopt;
     }
+    iterator.consume();
 
     const auto body = parse_stmt(iterator);
     if(body == std::nullopt) return std::nullopt;
@@ -657,6 +659,7 @@ std::optional<statement> parse_for_stmt(token_it &iterator) {
     logger << expect("closing parenthesis (`)`)", token);
     return std::nullopt;
   }
+  iterator.consume();
 
   const auto body = parse_stmt(iterator);
   if(body == std::nullopt) return std::nullopt;
@@ -686,24 +689,10 @@ std::optional<statement> parse_while_stmt(token_it &iterator) {
     return std::nullopt;
   }
 
-  token = *iterator;
-  iterator.consume(); // consume {
-  if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_OPEN) {
-    logger << expect("opening brace (`{`)", token);
-    return std::nullopt;
-  }
+  auto body = parse_stmt(iterator);
+  if(body == std::nullopt) return std::nullopt;
 
-  std::vector<statement> body;
-  while(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::BRACE_CLOSE) {
-    logger << info{ iterator->pos, "Started parsing statement in while body; *iterator=" + token_type(*iterator)};
-    const auto stmt = parse_stmt(iterator);
-    if(stmt == std::nullopt) return std::nullopt;
-    body.push_back(*stmt);
-  }
-
-  iterator.consume(); // consume }
-
-  return statement(while_stmt{ .is_do_while = false, .condition = *expr, .block = body }, pos);
+  return statement(while_stmt{ .is_do_while = false, .condition = *expr, .block = alloc(*body) }, pos);
 }
 
 std::optional<statement> parse_do_while_stmt(token_it &iterator) {
@@ -712,20 +701,9 @@ std::optional<statement> parse_do_while_stmt(token_it &iterator) {
   iterator.consume(); // consume do
 
   auto token = *iterator;
-  iterator.consume(); // consume }
-  if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_OPEN) {
-    logger << expect("opening brace (`{`)", token);
-    return std::nullopt;
-  }
 
-  std::vector<statement> body;
-  while(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::BRACE_CLOSE) {
-    const auto stmt = parse_stmt(iterator);
-    if(stmt == std::nullopt) return std::nullopt;
-    body.push_back(*stmt);
-  }
-
-  iterator.consume(); // consume }
+  auto body = parse_stmt(iterator);
+  if(body == std::nullopt) return std::nullopt;
 
   token = *iterator;
   iterator.consume(); // consume while
@@ -758,7 +736,7 @@ std::optional<statement> parse_do_while_stmt(token_it &iterator) {
     return std::nullopt;
   }
 
-  return statement(while_stmt{ .is_do_while = true, .condition = *expr, .block = body }, pos);
+  return statement(while_stmt{ .is_do_while = true, .condition = *expr, .block = alloc(*body) }, pos);
 }
 
 std::optional<statement> parse_return_stmt(token_it &iterator) {

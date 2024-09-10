@@ -934,6 +934,33 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       CHECK(is<eof>(it->actual));
     }
 
+    SUBCASE("member-call-member") {
+      const vec_source source({
+        {identifier{"cls"}, {}}, {symbol::DOT, {}}, {identifier{"method"}, {}},
+        {symbol::PAREN_OPEN, {}}, {identifier{"arg"}, {}}, {symbol::PAREN_CLOSE, {}},
+        {symbol::DOT, {}}, {identifier{"field"}, {}}
+      });
+
+      auto it = token_it(source);
+      auto res = parse_expr(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<member_expr>(res->content));
+      const auto &member1 = as<member_expr>(res->content);
+      CHECK(member1.member == "field");
+      REQUIRE(is<call_expr>(member1.base->content));
+      const auto &call = as<call_expr>(member1.base->content);
+      REQUIRE(is<member_expr>(call.call->content));
+      const auto &member2 = as<member_expr>(call.call->content);
+      CHECK(member2.member == "method");
+      REQUIRE(is<name_expr>(member2.base->content));
+      CHECK(as<name_expr>(member2.base->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(member2.base->content).name.sections[0] == "cls");
+      REQUIRE(call.args.size() == 1);
+      REQUIRE(is<name_expr>(call.args[0].content));
+      CHECK(as<name_expr>(call.args[0].content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call.args[0].content).name.sections[0] == "arg");
+    }
+
     SUBCASE("complex expression") {
       // (look, I know it's a senseless expression, but oh well... it's a nice nested test-case)
       // make_call() ? arr[12 - other_var] * 5 : std::test(_internal::arr()[6]) ? true * 12 : false << 14;
@@ -1560,9 +1587,187 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
       CHECK(is<eof>(it->actual));
     }
+
+    SUBCASE("for vs for-each statements") {
+      const vec_source source({
+        // for(var x = 0; x < 10; x++) call();
+        {keyword::FOR, {}}, {symbol::PAREN_OPEN, {}}, {keyword::VAR, {}},
+        {identifier{"x"}, {}}, {symbol::ASSIGN, {}}, {literal<int64_t>{0}, {}},
+        {symbol::SEMI, {}}, {identifier{"x"}, {}}, {symbol::LESS_THAN, {}},
+        {literal<int64_t>{10}, {}}, {symbol::SEMI, {}}, {identifier{"x"}, {}},
+        {symbol::INCREMENT, {}}, {symbol::PAREN_CLOSE, {}}, {identifier{"call"}, {}},
+        {symbol::PAREN_OPEN, {}}, {symbol::PAREN_CLOSE, {}}, {symbol::SEMI, {}},
+
+        // for(var x = 0; x < 10; x++) arr_check(arr[i]);
+        {keyword::FOR, {}}, {symbol::PAREN_OPEN, {}}, {keyword::VAR, {}},
+        {identifier{"x"}, {}}, {symbol::ASSIGN, {}}, {literal<int64_t>{0}, {}},
+        {symbol::SEMI, {}}, {identifier{"x"}, {}}, {symbol::LESS_THAN, {}},
+        {literal<int64_t>{10}, {}}, {symbol::SEMI, {}}, {identifier{"x"}, {}},
+        {symbol::INCREMENT, {}}, {symbol::PAREN_CLOSE, {}}, {identifier{"arr_check"}, {}},
+        {symbol::PAREN_OPEN, {}}, {identifier{"arr"}, {}}, {symbol::BRACKET_OPEN, {}},
+        {identifier{"i"}, {}}, {symbol::BRACKET_CLOSE, {}}, {symbol::PAREN_CLOSE, {}},
+        {symbol::SEMI, {}},
+
+        // for(x: arr) arr_check(x);
+        {keyword::FOR, {}}, {symbol::PAREN_OPEN, {}}, {identifier{"x"}, {}},
+        {symbol::COLON, {}}, {identifier{"arr"}, {}}, {symbol::PAREN_CLOSE, {}},
+        {identifier{"arr_check"}, {}}, {symbol::PAREN_OPEN, {}}, {identifier{"x"}, {}},
+        {symbol::PAREN_CLOSE, {}}, {symbol::SEMI, {}}
+      });
+
+      auto it = token_it(source);
+
+      // #1 -> for(var x = 0; x < 10; x++) call();
+      auto res = parse_stmt(it);
+      CAPTURE(*it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<for_stmt>(res->content));
+      const auto &for1 = as<for_stmt>(res->content);
+      REQUIRE(is<var_decl_stmt>(for1.init->content));
+      const auto &init1 = as<var_decl_stmt>(for1.init->content);
+      CHECK(init1.name == "x");
+      REQUIRE(is<literal_expr<int64_t>>(init1.value.content));
+      CHECK(as<literal_expr<int64_t>>(init1.value.content).value == 0);
+      REQUIRE(is<binary_expr>(for1.condition.content));
+      const auto &cond1 = as<binary_expr>(for1.condition.content);
+      CHECK(cond1.op == binary_op::LESS);
+      REQUIRE(is<name_expr>(cond1.left->content));
+      CHECK(as<name_expr>(cond1.left->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(cond1.left->content).name.sections[0] == "x");
+      REQUIRE(is<literal_expr<int64_t>>(cond1.right->content));
+      CHECK(as<literal_expr<int64_t>>(cond1.right->content).value == 10);
+      REQUIRE(is<unary_expr>(for1.update.content));
+      const auto &upd1 = as<unary_expr>(for1.update.content);
+      CHECK(upd1.op == unary_op::POST_INCR);
+      REQUIRE(is<expr_stmt>(for1.block->content));
+      const auto &block1 = as<expr_stmt>(for1.block->content);
+      REQUIRE(is<call_expr>(block1.expr.content));
+      const auto &call1 = as<call_expr>(block1.expr.content);
+      REQUIRE(is<name_expr>(call1.call->content));
+      CHECK(as<name_expr>(call1.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call1.call->content).name.sections[0] == "call");
+      CHECK(call1.args.empty());
+
+      // #2 -> for(var x = 0; x < 10; x++) arr_check(arr[i]);
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<for_stmt>(res->content));
+      const auto &for2 = as<for_stmt>(res->content);
+      REQUIRE(is<var_decl_stmt>(for2.init->content));
+      const auto &init2 = as<var_decl_stmt>(for2.init->content);
+      CHECK(init2.name == "x");
+      REQUIRE(is<literal_expr<int64_t>>(init2.value.content));
+      CHECK(as<literal_expr<int64_t>>(init2.value.content).value == 0);
+      REQUIRE(is<binary_expr>(for2.condition.content));
+      const auto &cond2 = as<binary_expr>(for2.condition.content);
+      CHECK(cond2.op == binary_op::LESS);
+      REQUIRE(is<name_expr>(cond2.left->content));
+      CHECK(as<name_expr>(cond2.left->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(cond2.left->content).name.sections[0] == "x");
+      REQUIRE(is<literal_expr<int64_t>>(cond2.right->content));
+      CHECK(as<literal_expr<int64_t>>(cond2.right->content).value == 10);
+      REQUIRE(is<unary_expr>(for2.update.content));
+      const auto &upd2 = as<unary_expr>(for2.update.content);
+      CHECK(upd2.op == unary_op::POST_INCR);
+      REQUIRE(is<expr_stmt>(for2.block->content));
+      const auto &block2 = as<expr_stmt>(for2.block->content);
+      REQUIRE(is<call_expr>(block2.expr.content));
+      const auto &call2 = as<call_expr>(block2.expr.content);
+      REQUIRE(is<name_expr>(call2.call->content));
+      CHECK(as<name_expr>(call2.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call2.call->content).name.sections[0] == "arr_check");
+      REQUIRE(call2.args.size() == 1);
+      REQUIRE(is<index_expr>(call2.args[0].content));
+      const auto &idx_expr = as<index_expr>(call2.args[0].content);
+      REQUIRE(is<name_expr>(idx_expr.base->content));
+      CHECK(as<name_expr>(idx_expr.base->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(idx_expr.base->content).name.sections[0] == "arr");
+      REQUIRE(is<name_expr>(idx_expr.index->content));
+      CHECK(as<name_expr>(idx_expr.index->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(idx_expr.index->content).name.sections[0] == "i");
+
+      // #3 -> for(x: arr) arr_check(x);
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<for_each_stmt>(res->content));
+      const auto &for3 = as<for_each_stmt>(res->content);
+      CHECK(for3.binding == "x");
+      REQUIRE(is<name_expr>(for3.collection.content));
+      CHECK(as<name_expr>(for3.collection.content).name.sections.size() == 1);
+      CHECK(as<name_expr>(for3.collection.content).name.sections[0] == "arr");
+      REQUIRE(is<expr_stmt>(for3.block->content));
+      const auto &block3 = as<expr_stmt>(for3.block->content);
+      REQUIRE(is<call_expr>(block3.expr.content));
+      const auto &call3 = as<call_expr>(block3.expr.content);
+      REQUIRE(is<name_expr>(call3.call->content));
+      CHECK(as<name_expr>(call3.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call3.call->content).name.sections[0] == "arr_check");
+      REQUIRE(call3.args.size() == 1);
+      REQUIRE(is<name_expr>(call3.args[0].content));
+
+      CHECK(is<eof>(it->actual));
+    }
+
+    SUBCASE("while and do-while statements") {
+      const vec_source source({
+        // while(true) break;
+        {keyword::WHILE, {}}, {symbol::PAREN_OPEN, {}}, {literal<bool>{true}, {}},
+        {symbol::PAREN_CLOSE, {}}, {keyword::BREAK, {}}, {symbol::SEMI, {}},
+
+        // do { continue; } while(false);
+        {keyword::DO, {}}, {symbol::BRACE_OPEN, {}}, {keyword::CONTINUE, {}},
+        {symbol::SEMI, {}}, {symbol::BRACE_CLOSE, {}}, {keyword::WHILE, {}},
+        {symbol::PAREN_OPEN, {}}, {literal<bool>{false}, {}}, {symbol::PAREN_CLOSE, {}},
+        {symbol::SEMI, {}},
+
+        // do return; while(false);
+        {keyword::DO, {}}, {keyword::RETURN, {}}, {symbol::SEMI, {}}, {keyword::WHILE, {}},
+        {symbol::PAREN_OPEN, {}}, {literal<bool>{false}, {}}, {symbol::PAREN_CLOSE, {}},
+        {symbol::SEMI, {}}
+      });
+
+      // #1 -> while(true) break;
+      auto it = token_it(source);
+      auto res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<while_stmt>(res->content));
+      const auto &while1 = as<while_stmt>(res->content);
+      REQUIRE(is<literal_expr<bool>>(while1.condition.content));
+      CHECK(as<literal_expr<bool>>(while1.condition.content).value == true);
+      REQUIRE(is<break_stmt>(while1.block->content));
+      CHECK(!while1.is_do_while);
+
+      // #2 -> do { continue; } while(false);
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<while_stmt>(res->content));
+      const auto &while2 = as<while_stmt>(res->content);
+      REQUIRE(is<block>(while2.block->content));
+      const auto &block1 = as<block>(while2.block->content);
+      REQUIRE(block1.statements.size() == 1);
+      REQUIRE(is<continue_stmt>(block1.statements[0].content));
+      REQUIRE(is<literal_expr<bool>>(while2.condition.content));
+      CHECK(as<literal_expr<bool>>(while2.condition.content).value == false);
+      CHECK(while2.is_do_while);
+
+      // #3 -> do return; while(false);
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<while_stmt>(res->content));
+      const auto &while3 = as<while_stmt>(res->content);
+      REQUIRE(is<return_stmt>(while3.block->content));
+      const auto &ret = as<return_stmt>(while3.block->content);
+      CHECK(!ret.value.has_value());
+      REQUIRE(is<literal_expr<bool>>(while3.condition.content));
+      CHECK(as<literal_expr<bool>>(while3.condition.content).value == false);
+      CHECK(while3.is_do_while);
+
+      CHECK(is<eof>(it->actual));
+    }
   }
 
   // TODO: declarations
+  TEST_CASE("valid declarations") {}
 
   // TODO: mini scripts
 }
