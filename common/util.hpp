@@ -107,6 +107,12 @@ std::optional<std::pair<X, Y>> merge(const std::optional<X> &x, const std::optio
   if(!y.has_value()) return std::nullopt;
   return std::pair{*x, *y};
 }
+
+template <typename T>
+using opt_ref = std::optional<std::reference_wrapper<T>>;
+
+template <typename T>
+constexpr opt_ref<T> mk_opt_ref(T &t) { return std::optional{std::reference_wrapper{t}};}
 }
 
 #endif //UTIL_HPP

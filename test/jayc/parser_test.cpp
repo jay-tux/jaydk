@@ -1158,7 +1158,409 @@ TEST_SUITE("jayc - parser (parsing okay)") {
     }
   }
 
-  // TODO: statements
+  TEST_CASE("valid statements") {
+    logger.enable_throw_on_error();
+    SUBCASE("trivial statements") {
+      const vec_source source({
+        {keyword::BREAK, {}}, {symbol::SEMI, {}},
+        {keyword::CONTINUE, {}}, {symbol::SEMI, {}},
+        {keyword::RETURN, {}}, {symbol::SEMI, {}},
+        {keyword::RETURN, {}}, {identifier{"x"}, {}}, {symbol::SEMI, {}}
+      });
+
+      // #1 -> break;
+      auto it = token_it(source);
+      auto res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      CHECK(is<break_stmt>(res->content));
+      CHECK(is<keyword>(it->actual));
+      CHECK(as<keyword>(it->actual) == keyword::CONTINUE);
+
+      // #2 -> continue;
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      CHECK(is<continue_stmt>(res->content));
+      CHECK(is<keyword>(it->actual));
+      CHECK(as<keyword>(it->actual) == keyword::RETURN);
+
+      // #3 -> return;
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<return_stmt>(res->content));
+      CHECK_FALSE(as<return_stmt>(res->content).value.has_value());
+      CHECK(is<keyword>(it->actual));
+      CHECK(as<keyword>(it->actual) == keyword::RETURN);
+
+      // #4 -> return x;
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<return_stmt>(res->content));
+      CHECK(as<return_stmt>(res->content).value.has_value());
+      const auto &ret_val = *as<return_stmt>(res->content).value;
+      REQUIRE(is<name_expr>(ret_val.content));
+      CHECK(as<name_expr>(ret_val.content).name.sections.size() == 1);
+      CHECK(as<name_expr>(ret_val.content).name.sections[0] == "x");
+      CHECK(is<eof>(it->actual));
+    }
+
+    SUBCASE("statement block") {
+      const vec_source source({
+        {symbol::BRACE_OPEN, {}}, {symbol::BRACE_CLOSE, {}},
+        {symbol::BRACE_OPEN, {}}, {keyword::BREAK, {}}, {symbol::SEMI, {}}, {symbol::BRACE_CLOSE, {}}
+      });
+
+      auto it = token_it(source);
+
+      // #1 -> {}
+      auto res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<block>(res->content));
+      CHECK(as<block>(res->content).statements.empty());
+      REQUIRE(is<symbol>(it->actual));
+      CHECK(as<symbol>(it->actual) == symbol::BRACE_OPEN);
+
+      // #2 -> { break; }
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<block>(res->content));
+      CHECK(as<block>(res->content).statements.size() == 1);
+      const auto &first = as<block>(res->content).statements[0];
+      CHECK(is<break_stmt>(first.content));
+      CHECK(is<eof>(it->actual));
+    }
+
+    SUBCASE("expression statements") {
+      const vec_source source({
+        {identifier{"method"}, {}}, {symbol::PAREN_OPEN, {}}, {symbol::PAREN_CLOSE, {}}, {symbol::SEMI, {}},
+        {literal<int64_t>{12}, {}}, {symbol::SEMI, {}},
+        {literal<float>{12.5f}, {}}, {symbol::EQUALS, {}}, {literal<double>{25.0}, {}}, {symbol::DIVIDE, {}}, {literal<int64_t>{2}, {}}, {symbol::SEMI, {}}
+      });
+
+      auto it = token_it(source);
+
+      // #1 -> method();
+      auto res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<expr_stmt>(res->content));
+      const auto &expr1 = as<expr_stmt>(res->content).expr;
+      REQUIRE(is<call_expr>(expr1.content));
+      const auto &call1 = as<call_expr>(expr1.content);
+      REQUIRE(is<name_expr>(call1.call->content));
+      CHECK(as<name_expr>(call1.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call1.call->content).name.sections[0] == "method");
+      CHECK(call1.args.empty());
+
+      // #2 -> 12;
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<expr_stmt>(res->content));
+      const auto &expr2 = as<expr_stmt>(res->content).expr;
+      REQUIRE(is<literal_expr<int64_t>>(expr2.content));
+      CHECK(as<literal_expr<int64_t>>(expr2.content).value == 12);
+
+      // #3 -> 12.5f == 25.0 / 2;
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<expr_stmt>(res->content));
+      const auto &expr3 = as<expr_stmt>(res->content).expr;
+      REQUIRE(is<binary_expr>(expr3.content));
+      const auto &equal = as<binary_expr>(expr3.content);
+      CHECK(equal.op == binary_op::EQUAL);
+      REQUIRE(is<literal_expr<float>>(equal.left->content));
+      CHECK(as<literal_expr<float>>(equal.left->content).value == 12.5f);
+      REQUIRE(is<binary_expr>(equal.right->content));
+      const auto &div = as<binary_expr>(equal.right->content);
+      CHECK(div.op == binary_op::DIVIDE);
+      REQUIRE(is<literal_expr<double>>(div.left->content));
+      CHECK(as<literal_expr<double>>(div.left->content).value == 25.0);
+      REQUIRE(is<literal_expr<int64_t>>(div.right->content));
+      CHECK(as<literal_expr<int64_t>>(div.right->content).value == 2);
+
+      CHECK(is<eof>(it->actual));
+    }
+
+    SUBCASE("var declaration statements") {
+      const vec_source source({
+        {keyword::VAR, {}}, {identifier{"x"}, {}}, {symbol::ASSIGN, {}}, {literal<int64_t>{42}, {}}, {symbol::SEMI, {}}
+      });
+
+      auto it = token_it(source);
+      // var x = 42;
+      auto res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<var_decl_stmt>(res->content));
+      const auto &var_decl = as<var_decl_stmt>(res->content);
+      CHECK(var_decl.name == "x");
+      REQUIRE(is<literal_expr<int64_t>>(var_decl.value.content));
+      CHECK(as<literal_expr<int64_t>>(var_decl.value.content).value == 42);
+    }
+
+    SUBCASE("assignment statements (normal and operator-based)") {
+      const vec_source source({
+        {identifier{"x"}, {}}, {symbol::ASSIGN, {}}, {literal<int64_t>{42}, {}}, {symbol::SEMI, {}},
+        {identifier{"arr"}, {}}, {symbol::BRACKET_OPEN, {}}, {literal<int64_t>{3}, {}}, {symbol::BRACKET_CLOSE, {}}, {symbol::MULTIPLY_ASSIGN, {}}, {literal<int64_t>{0}, {}}, {symbol::SEMI, {}}
+      });
+
+      auto it = token_it(source);
+
+      // #1 -> x = 42;
+      auto res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<assign_stmt>(res->content));
+      const auto &assign1 = as<assign_stmt>(res->content);
+      REQUIRE(is<name_expr>(assign1.lvalue.content));
+      CHECK(as<name_expr>(assign1.lvalue.content).name.sections.size() == 1);
+      CHECK(as<name_expr>(assign1.lvalue.content).name.sections[0] == "x");
+      REQUIRE(is<literal_expr<int64_t>>(assign1.value.content));
+      CHECK(as<literal_expr<int64_t>>(assign1.value.content).value == 42);
+
+      // #2 -> arr[3] *= 0;
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<op_assign_stmt>(res->content));
+      const auto &assign2 = as<op_assign_stmt>(res->content);
+      REQUIRE(is<index_expr>(assign2.lvalue.content));
+      const auto &idx_expr = as<index_expr>(assign2.lvalue.content);
+      REQUIRE(is<name_expr>(idx_expr.base->content));
+      CHECK(as<name_expr>(idx_expr.base->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(idx_expr.base->content).name.sections[0] == "arr");
+      REQUIRE(is<literal_expr<int64_t>>(idx_expr.index->content));
+      CHECK(as<literal_expr<int64_t>>(idx_expr.index->content).value == 3);
+      REQUIRE(is<literal_expr<int64_t>>(assign2.value.content));
+      CHECK(as<literal_expr<int64_t>>(assign2.value.content).value == 0);
+      CHECK(assign2.op == binary_op::MULTIPLY);
+
+      CHECK(is<eof>(it->actual));
+    }
+
+    SUBCASE("if-else statements") {
+      location last = {"", 0, 0};
+      static auto pos = [&last] {
+        last.col++;
+        return last;
+      };
+      static auto line = [&last] {
+        last.line++;
+        last.col = 0;
+        return last;
+      };
+
+      const vec_source source({
+        // if(true) {}
+        {keyword::IF, line()}, {symbol::PAREN_OPEN, pos()}, {literal<bool>{true}, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {symbol::BRACE_OPEN, pos()}, {symbol::BRACE_CLOSE, pos()},
+
+        // if(false) do_test();
+        {keyword::IF, line()}, {symbol::PAREN_OPEN, pos()}, {literal<bool>{false}, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {identifier{"do_test"}}, {symbol::PAREN_OPEN, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {symbol::SEMI, pos()},
+
+        // if(x == y) return x; else { do_something(); }
+        {keyword::IF, line()}, {symbol::PAREN_OPEN, pos()}, {identifier{"x"}, pos()},
+        {symbol::EQUALS, pos()}, {identifier{"y"}, pos()}, {symbol::PAREN_CLOSE, pos()},
+        {keyword::RETURN, pos()}, {identifier{"x"}, pos()}, {symbol::SEMI, pos()},
+        {keyword::ELSE, pos()}, {symbol::BRACE_OPEN, pos()}, {identifier{"do_something"}, pos()},
+        {symbol::PAREN_OPEN, pos()}, {symbol::PAREN_CLOSE, pos()}, {symbol::SEMI, pos()},
+        {symbol::BRACE_CLOSE, pos()},
+
+        // if(x != y) { do_something(); } else return y;
+        {keyword::IF, line()}, {symbol::PAREN_OPEN, pos()}, {identifier{"x"}, pos()},
+        {symbol::NOT_EQUALS, pos()}, {identifier{"y"}, pos()}, {symbol::PAREN_CLOSE, pos()},
+        {symbol::BRACE_OPEN, pos()}, {identifier{"do_something"}, pos()}, {symbol::PAREN_OPEN, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {symbol::SEMI, pos()}, {symbol::BRACE_CLOSE, pos()},
+        {keyword::ELSE, pos()}, {keyword::RETURN, pos()}, {identifier{"y"}, pos()}, {symbol::SEMI, pos()},
+
+        // if(a) b(); else if(c) d(); else e();
+        {keyword::IF, line()}, {symbol::PAREN_OPEN, pos()}, {identifier{"a"}, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {identifier{"b"}, pos()}, {symbol::PAREN_OPEN, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {symbol::SEMI, pos()}, {keyword::ELSE, pos()},
+        {keyword::IF, pos()}, {symbol::PAREN_OPEN, pos()}, {identifier{"c"}, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {identifier{"d"}, pos()}, {symbol::PAREN_OPEN, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {symbol::SEMI, pos()},{keyword::ELSE, pos()},
+        {identifier{"e"}, pos()}, {symbol::PAREN_OPEN, pos()}, {symbol::PAREN_CLOSE, pos()},
+        {symbol::SEMI, pos()},
+
+        // if(a) if(b) c(); else d();
+        {keyword::IF, line()}, {symbol::PAREN_OPEN, pos()}, {identifier{"a"}, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {keyword::IF, pos()}, {symbol::PAREN_OPEN, pos()},
+        {identifier{"b"}, pos()}, {symbol::PAREN_CLOSE, pos()}, {identifier{"c"}, pos()},
+        {symbol::PAREN_OPEN, pos()}, {symbol::PAREN_CLOSE, pos()}, {symbol::SEMI, pos()},
+        {keyword::ELSE, pos()}, {identifier{"d"}, pos()}, {symbol::PAREN_OPEN, pos()},
+        {symbol::PAREN_CLOSE, pos()}, {symbol::SEMI, pos()}
+      });
+
+      auto it = token_it(source);
+
+      // #1 -> if(true) {}
+      auto res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<if_stmt>(res->content));
+      const auto &if1 = as<if_stmt>(res->content);
+      REQUIRE(is<literal_expr<bool>>(if1.condition.content));
+      CHECK(as<literal_expr<bool>>(if1.condition.content).value == true);
+      REQUIRE(is<block>(if1.true_block->content));
+      CHECK(as<block>(if1.true_block->content).statements.empty());
+      CHECK(!if1.false_block.has_value());
+
+      // #2 -> if(false) do_test();
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<if_stmt>(res->content));
+      const auto &if2 = as<if_stmt>(res->content);
+      REQUIRE(is<literal_expr<bool>>(if2.condition.content));
+      CHECK(as<literal_expr<bool>>(if2.condition.content).value == false);
+      REQUIRE(is<expr_stmt>(if2.true_block->content));
+      const auto &true1 = as<expr_stmt>(if2.true_block->content);
+      REQUIRE(is<call_expr>(true1.expr.content));
+      const auto &call1 = as<call_expr>(true1.expr.content);
+      REQUIRE(is<name_expr>(call1.call->content));
+      CHECK(as<name_expr>(call1.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call1.call->content).name.sections[0] == "do_test");
+      CHECK(call1.args.empty());
+      CHECK(!if2.false_block.has_value());
+
+      // #3 -> if(x == y) return x; else { do_something(); }
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<if_stmt>(res->content));
+      const auto &if3 = as<if_stmt>(res->content);
+      REQUIRE(is<binary_expr>(if3.condition.content));
+      const auto &eq = as<binary_expr>(if3.condition.content);
+      CHECK(eq.op == binary_op::EQUAL);
+      REQUIRE(is<name_expr>(eq.left->content));
+      CHECK(as<name_expr>(eq.left->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(eq.left->content).name.sections[0] == "x");
+      REQUIRE(is<name_expr>(eq.right->content));
+      CHECK(as<name_expr>(eq.right->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(eq.right->content).name.sections[0] == "y");
+      REQUIRE(is<return_stmt>(if3.true_block->content));
+      const auto &ret1 = as<return_stmt>(if3.true_block->content);
+      REQUIRE(ret1.value.has_value());
+      REQUIRE(is<name_expr>(ret1.value->content));
+      CHECK(as<name_expr>(ret1.value->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(ret1.value->content).name.sections[0] == "x");
+      REQUIRE(if3.false_block.has_value());
+      REQUIRE(is<block>(if3.false_block.value()->content));
+      const auto &false1 = as<block>(if3.false_block.value()->content);
+      REQUIRE(false1.statements.size() == 1);
+      REQUIRE(is<expr_stmt>(false1.statements[0].content));
+      const auto &expr1 = as<expr_stmt>(false1.statements[0].content);
+      REQUIRE(is<call_expr>(expr1.expr.content));
+      const auto &call2 = as<call_expr>(expr1.expr.content);
+      REQUIRE(is<name_expr>(call2.call->content));
+      CHECK(as<name_expr>(call2.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call2.call->content).name.sections[0] == "do_something");
+      CHECK(call2.args.empty());
+
+      // #4 -> if(x != y) { do_something(); } else return y;
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<if_stmt>(res->content));
+      const auto &if4 = as<if_stmt>(res->content);
+      REQUIRE(is<binary_expr>(if4.condition.content));
+      const auto &neq = as<binary_expr>(if4.condition.content);
+      CHECK(neq.op == binary_op::NOT_EQUAL);
+      REQUIRE(is<name_expr>(neq.left->content));
+      CHECK(as<name_expr>(neq.left->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(neq.left->content).name.sections[0] == "x");
+      REQUIRE(is<name_expr>(neq.right->content));
+      CHECK(as<name_expr>(neq.right->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(neq.right->content).name.sections[0] == "y");
+      REQUIRE(is<block>(if4.true_block->content));
+      const auto &true2 = as<block>(if4.true_block->content);
+      REQUIRE(true2.statements.size() == 1);
+      REQUIRE(is<expr_stmt>(true2.statements[0].content));
+      const auto &expr2 = as<expr_stmt>(true2.statements[0].content);
+      REQUIRE(is<call_expr>(expr2.expr.content));
+      const auto &call3 = as<call_expr>(expr2.expr.content);
+      REQUIRE(is<name_expr>(call3.call->content));
+      CHECK(as<name_expr>(call3.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call3.call->content).name.sections[0] == "do_something");
+      CHECK(call3.args.empty());
+      REQUIRE(if4.false_block.has_value());
+      REQUIRE(is<return_stmt>(if4.false_block.value()->content));
+      const auto &ret2 = as<return_stmt>(if4.false_block.value()->content);
+      REQUIRE(ret2.value.has_value());
+      REQUIRE(is<name_expr>(ret2.value->content));
+      CHECK(as<name_expr>(ret2.value->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(ret2.value->content).name.sections[0] == "y");
+
+      // #5 -> if(a) b(); else if(c) d(); else e();
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<if_stmt>(res->content));
+      const auto &if5 = as<if_stmt>(res->content);
+      REQUIRE(is<name_expr>(if5.condition.content));
+      CHECK(as<name_expr>(if5.condition.content).name.sections.size() == 1);
+      CHECK(as<name_expr>(if5.condition.content).name.sections[0] == "a");
+      REQUIRE(is<expr_stmt>(if5.true_block->content));
+      const auto &true3 = as<expr_stmt>(if5.true_block->content);
+      REQUIRE(is<call_expr>(true3.expr.content));
+      const auto &call4 = as<call_expr>(true3.expr.content);
+      REQUIRE(is<name_expr>(call4.call->content));
+      CHECK(as<name_expr>(call4.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call4.call->content).name.sections[0] == "b");
+      CHECK(call4.args.empty());
+      CAPTURE(*it);
+      REQUIRE(if5.false_block.has_value());
+      REQUIRE(is<if_stmt>(if5.false_block.value()->content));
+      const auto &if6 = as<if_stmt>(if5.false_block.value()->content);
+      REQUIRE(is<name_expr>(if6.condition.content));
+      CHECK(as<name_expr>(if6.condition.content).name.sections.size() == 1);
+      CHECK(as<name_expr>(if6.condition.content).name.sections[0] == "c");
+      REQUIRE(is<expr_stmt>(if6.true_block->content));
+      const auto &true4 = as<expr_stmt>(if6.true_block->content);
+      REQUIRE(is<call_expr>(true4.expr.content));
+      const auto &call5 = as<call_expr>(true4.expr.content);
+      REQUIRE(is<name_expr>(call5.call->content));
+      CHECK(as<name_expr>(call5.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call5.call->content).name.sections[0] == "d");
+      CHECK(call5.args.empty());
+      REQUIRE(if6.false_block.has_value());
+      REQUIRE(is<expr_stmt>(if6.false_block.value()->content));
+      const auto &false2 = as<expr_stmt>(if6.false_block.value()->content);
+      REQUIRE(is<call_expr>(false2.expr.content));
+      const auto &call6 = as<call_expr>(false2.expr.content);
+      REQUIRE(is<name_expr>(call6.call->content));
+      CHECK(as<name_expr>(call6.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call6.call->content).name.sections[0] == "e");
+      CHECK(call6.args.empty());
+
+      // #6 -> if(a) if(b) c(); else d();
+      res = parse_stmt(it);
+      REQUIRE(res.has_value());
+      REQUIRE(is<if_stmt>(res->content));
+      const auto &if7 = as<if_stmt>(res->content);
+      REQUIRE(is<name_expr>(if7.condition.content));
+      CHECK(as<name_expr>(if7.condition.content).name.sections.size() == 1);
+      CHECK(as<name_expr>(if7.condition.content).name.sections[0] == "a");
+      REQUIRE(is<if_stmt>(if7.true_block->content));
+      const auto &if8 = as<if_stmt>(if7.true_block->content);
+      REQUIRE(is<name_expr>(if8.condition.content));
+      CHECK(as<name_expr>(if8.condition.content).name.sections.size() == 1);
+      CHECK(as<name_expr>(if8.condition.content).name.sections[0] == "b");
+      REQUIRE(is<expr_stmt>(if8.true_block->content));
+      const auto &true5 = as<expr_stmt>(if8.true_block->content);
+      REQUIRE(is<call_expr>(true5.expr.content));
+      const auto &call7 = as<call_expr>(true5.expr.content);
+      REQUIRE(is<name_expr>(call7.call->content));
+      CHECK(as<name_expr>(call7.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call7.call->content).name.sections[0] == "c");
+      CHECK(call7.args.empty());
+      REQUIRE(if8.false_block.has_value());
+      REQUIRE(is<expr_stmt>(if8.false_block.value()->content));
+      const auto &false3 = as<expr_stmt>(if8.false_block.value()->content);
+      REQUIRE(is<call_expr>(false3.expr.content));
+      const auto &call8 = as<call_expr>(false3.expr.content);
+      REQUIRE(is<name_expr>(call8.call->content));
+      CHECK(as<name_expr>(call8.call->content).name.sections.size() == 1);
+      CHECK(as<name_expr>(call8.call->content).name.sections[0] == "d");
+      CHECK(call8.args.empty());
+      CHECK(!if7.false_block.has_value());
+
+      CHECK(is<eof>(it->actual));
+    }
+  }
 
   // TODO: declarations
 

@@ -15,7 +15,7 @@ using namespace jaydk;
 using namespace jayc::lexer;
 
 inline static std::string symbols_source = "+-*/%\n++--=\n==!=<><=>=\n&&||!&|~^<<>>\n.::\n()[]{}\n,;:?\n+=-=*=/=%=\n&=|=^=";
-inline static std::string keywords_source = "fun\tvar\nif else\tfor\nwhile do\treturn\nbreak continue\tnamespace\nstruct";
+inline static std::string keywords_source = "fun\tvar\nif else\tfor\nwhile do\treturn\nbreak continue\tnamespace\nstruct\tauto";
 inline static std::string id_keyword_source = "__ignored fun test var _name continue with2numbers3 ____";
 inline static std::string bool_literal_source = "true false";
 inline static std::string i64_literal_source = "-10 123 -589 +12";
@@ -118,7 +118,7 @@ TEST_SUITE("jayc - lexer (lexing okay)") {
   TEST_CASE("keyword tokens") {
     auto lex = lex_source(keywords_source);
     token t;
-    // for\tvar\nif else\tfor\nwhile do\treturn\nbreak continue\tnamespace\nstruct
+    // for\tvar\nif else\tfor\nwhile do\treturn\nbreak continue\tnamespace\nstruct\tauto
     std::vector<std::pair<int, int>> keyword_positions = {
       // 1234 567
       // for\tvar
@@ -132,12 +132,12 @@ TEST_SUITE("jayc - lexer (lexing okay)") {
       // 123456789012345 678901234
       // break continue\tnamespace
       {4, 1}, {4, 7}, {4, 16},
-      // 123456
-      // struct
-      {5, 1}
+      // 1234567 8901
+      // struct\tauto
+      {5, 1}, {5, 8}
     };
 
-    for(auto k = keyword::FUN; k <= keyword::STRUCT; ++k) {
+    for(auto k = keyword::FUN; k <= keyword::AUTO; ++k) {
       REQUIRE_FALSE(lex.is_eof());
       lex >> t;
       CAPTURE(t);
@@ -416,15 +416,17 @@ TEST_SUITE("jayc - lexer (lexing okay)") {
 
     std::vector<token> expected = {
       //          1         2
-      // 1234567890123456789012
-      // fun factorial(int x) {
+      // 123456789012345678901234567
+      // fun factorial(int x): int {
       { .actual = keyword::FUN, .pos = {script, 1, 1} },
       { .actual = identifier{"factorial"}, .pos = {script, 1, 5} },
       { .actual = symbol::PAREN_OPEN, .pos = {script, 1, 14} },
       { .actual = identifier{"int"}, .pos = {script, 1, 15} },
       { .actual = identifier{"x"}, .pos = {script, 1, 19} },
       { .actual = symbol::PAREN_CLOSE, .pos = {script, 1, 20} },
-      { .actual = symbol::BRACE_OPEN, .pos = {script, 1, 22} },
+      { .actual = symbol::COLON, .pos = {script, 1, 21} },
+      {.actual = identifier{"int"}, .pos = {script, 1, 23} },
+      { .actual = symbol::BRACE_OPEN, .pos = {script, 1, 27} },
 
       //          1         2
       // 123456789012345678901234
@@ -458,15 +460,17 @@ TEST_SUITE("jayc - lexer (lexing okay)") {
       { .actual = symbol::BRACE_CLOSE, .pos = {script, 4, 1} },
 
       //          1         2         3
-      // 123456789012345678901234567890
-      // fun factorial_non_rec(int x) {
+      // 123456789012345678901234567890123456
+      // fun factorial_non_rec(int x): auto {
       { .actual = keyword::FUN, .pos = {script, 6, 1} },
       { .actual = identifier{"factorial_non_rec"}, .pos = {script, 6, 5} },
       { .actual = symbol::PAREN_OPEN, .pos = {script, 6, 22} },
       { .actual = identifier{"int"}, .pos = {script, 6, 23} },
       { .actual = identifier{"x"}, .pos = {script, 6, 27} },
       { .actual = symbol::PAREN_CLOSE, .pos = {script, 6, 28} },
-      { .actual = symbol::BRACE_OPEN, .pos = {script, 6, 30} },
+      { .actual = symbol::COLON, .pos = {script, 6, 29}},
+      { .actual = keyword::AUTO, .pos = {script, 6, 31} },
+      { .actual = symbol::BRACE_OPEN, .pos = {script, 6, 36} },
 
       //          1
       // 1234567890123456

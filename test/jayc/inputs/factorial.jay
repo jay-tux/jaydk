@@ -1,9 +1,9 @@
-fun factorial(int x) {
+fun factorial(int x): int {
     if(x <= 1) return 1;
     return x * factorial(x - 1);
 }
 
-fun factorial_non_rec(int x) {
+fun factorial_non_rec(int x): auto {
     int acc = x;
     while(x --> 0) {
         acc *= x;

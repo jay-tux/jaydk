@@ -112,6 +112,7 @@ struct expr_stmt {
   expression expr;
 };
 
+// TODO: allow optional type, allow kotlin-style val/var instead of var only
 struct var_decl_stmt {
   std::string name;
   expression value;
@@ -189,8 +190,13 @@ struct function_decl {
     std::string name;
     location pos;
   };
+  struct no_return_type {};
+  struct auto_type {};
+  using return_type_t = std::variant<no_return_type, auto_type, type_name>;
+
   std::string name;
   std::vector<arg> args;
+  return_type_t return_type;
   std::vector<statement> body;
 };
 

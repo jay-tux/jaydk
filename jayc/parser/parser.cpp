@@ -429,7 +429,8 @@ std::optional<expression> jayc::parser::parse_expr(token_it &iterator) {
 
 namespace stmt_parsers {
 template <typename T>
-std::optional<T> check_semi(token_it &iterator, const T &t) {
+std::optional<T> check_semi(token_it &iterator, const T &t, bool consume_first = false) {
+  if(consume_first) iterator.consume();
   const auto [a, p] = *iterator;
   iterator.consume();
   if(is<symbol>(a) && as<symbol>(a) == symbol::SEMI) {
@@ -811,8 +812,8 @@ std::optional<statement> jayc::parser::parse_stmt(token_it &iterator) {
       case keyword::WHILE: return parse_while_stmt(iterator);
       case keyword::DO: return parse_do_while_stmt(iterator);
       case keyword::RETURN: return parse_return_stmt(iterator);
-      case keyword::BREAK: return check_semi(iterator, statement(break_stmt{}, pos));
-      case keyword::CONTINUE: return check_semi(iterator, statement(continue_stmt{}, pos));
+      case keyword::BREAK: return check_semi(iterator, statement(break_stmt{}, pos), true);
+      case keyword::CONTINUE: return check_semi(iterator, statement(continue_stmt{}, pos), true);
       case keyword::ELSE: {
         logger << else_no_if(pos);
         return std::nullopt;
@@ -831,7 +832,7 @@ std::optional<statement> jayc::parser::parse_stmt(token_it &iterator) {
 namespace decl_parsers {
 
 std::optional<declaration> parse_fun_decl(token_it &iterator) {
-  // fun (<type>.)?<name>((<type> <name>(, <type> <name>)*)?) { <body> }
+  // fun (<type>.)?<name>((<type> <name>(, <type> <name>)*)?) (: <tname>|auto)? { <body> }
   const auto [_, fun_pos] = *iterator;
   iterator.consume(); // consume fun
 
@@ -894,6 +895,28 @@ std::optional<declaration> parse_fun_decl(token_it &iterator) {
   }
 
   token = *iterator;
+  function_decl::return_type_t ret_type = function_decl::no_return_type{};
+  if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::COLON) {
+    iterator.consume(); // consume :
+
+    token = *iterator;
+    if(is<keyword>(token.actual)) {
+      iterator.consume(); // consume auto
+      if(as<keyword>(token.actual) != keyword::AUTO) {
+        logger << expect("qualified type name or auto", token);
+        return std::nullopt;
+      }
+
+      ret_type = function_decl::auto_type{};
+    }
+    else {
+      auto tname = parse_tname(iterator);
+      if(tname == std::nullopt) return std::nullopt;
+      ret_type = *tname;
+    }
+  }
+
+  token = *iterator;
   iterator.consume();
   if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_OPEN) {
     logger << expect("opening brace (`{`)", token);
@@ -919,7 +942,7 @@ std::optional<declaration> parse_fun_decl(token_it &iterator) {
   }
 
   return declaration(
-    function_decl { .name = name, .args = std::move(args), .body = std::move(body) },
+    function_decl { .name = name, .args = std::move(args), .return_type = ret_type, .body = std::move(body) },
     fun_pos
   );
 }

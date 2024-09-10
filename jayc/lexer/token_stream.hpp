@@ -32,7 +32,7 @@ enum class symbol {
   BIT_AND_ASSIGN, BIT_OR_ASSIGN, XOR_ASSIGN,
 };
 enum class keyword {
-  FUN, VAR, IF, ELSE, FOR, WHILE, DO, RETURN, BREAK, CONTINUE, NAMESPACE, STRUCT
+  FUN, VAR, IF, ELSE, FOR, WHILE, DO, RETURN, BREAK, CONTINUE, NAMESPACE, STRUCT, AUTO
 };
 struct identifier {
   std::string ident;
