@@ -112,7 +112,71 @@ template <typename T>
 using opt_ref = std::optional<std::reference_wrapper<T>>;
 
 template <typename T>
-constexpr opt_ref<T> mk_opt_ref(T &t) { return std::optional{std::reference_wrapper{t}};}
+constexpr opt_ref<T> mk_opt_ref(T &t) { return std::optional{std::reference_wrapper{t}}; }
+
+template <typename T>
+class heap_opt {
+public:
+  constexpr heap_opt() = default;
+  inline heap_opt(const T &t) /*requires(std::copy_constructible<T>)*/ : ptr{new T{t}} {}
+  inline heap_opt(T &&t) /*requires(std::move_constructible<T>)*/ : ptr{new T{std::forward<T &&>(t)}} {}
+  constexpr heap_opt(std::nullopt_t) {}
+  inline heap_opt(const heap_opt &other) /*requires(std::copy_constructible<T>)*/ { *this = other; }
+  inline heap_opt(heap_opt &&other) noexcept /*requires(std::move_constructible<T>)*/ { *this = std::move(other); }
+
+  inline heap_opt &operator=(const heap_opt<T> &other) /*requires(std::copy_constructible<T>)*/ {
+    if(this == &other) return *this;
+    delete ptr;
+    if(other.ptr == nullptr) ptr = nullptr;
+    else ptr = new T{*other.ptr};
+    return *this;
+  }
+
+  inline heap_opt &operator=(heap_opt<T> &&other) noexcept /*requires(std::move_constructible<T>)*/ {
+    std::swap(ptr, other.ptr);
+    return *this;
+  }
+
+  inline heap_opt &operator=(const T &other) /*requires(std::copy_constructible<T>)*/ {
+    delete ptr;
+    ptr = new T{other};
+    return *this;
+  }
+
+  inline heap_opt &operator=(T &&other) /*requires(std::move_constructible<T>)*/ {
+    delete ptr;
+    ptr = new T{std::forward<T &&>(other)};
+    return *this;
+  }
+
+  inline heap_opt &operator=(std::nullopt_t) {
+    delete ptr;
+    ptr = nullptr;
+    return *this;
+  }
+
+  [[nodiscard]] constexpr bool has_value() const { return ptr != nullptr; }
+  constexpr T &value() { return *ptr; }
+  constexpr const T &value() const { return *ptr; }
+
+  constexpr operator bool() const { return ptr != nullptr; }
+  constexpr T &operator*() { return *ptr; }
+  constexpr const T &operator*() const { return *ptr; }
+  constexpr T *operator->() { return ptr; }
+  constexpr const T *operator->() const { return ptr; }
+
+  constexpr bool operator==(std::nullopt_t) const { return ptr == nullptr; }
+  constexpr bool operator==(const heap_opt &other) const {
+    if(ptr == nullptr) return other.ptr == nullptr;
+    if(other.ptr == nullptr) return false;
+    return *ptr == *other.ptr;
+  }
+
+  ~heap_opt() { delete ptr; }
+
+private:
+  T *ptr = nullptr;
+};
 }
 
 #endif //UTIL_HPP

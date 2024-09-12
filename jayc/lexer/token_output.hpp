@@ -33,7 +33,8 @@ inline std::ostream &operator<<(std::ostream &target, const symbol &sym) {
   X(XOR, "^") X(SHIFT_LEFT, "<<") X(SHIFT_RIGHT, ">>") \
   X(DOT, ".") X(NAMESPACE, "::") \
   X(PAREN_OPEN, "(") X(PAREN_CLOSE, ")") X(BRACKET_OPEN, "[") X(BRACKET_CLOSE, "]") \
-  X(BRACE_OPEN, "{") X(BRACE_CLOSE, "}") X(COMMA, ",") X(SEMI, ";") X(COLON, ":") X(QUESTION, "?");
+  X(BRACE_OPEN, "{") X(BRACE_CLOSE, "}") X(COMMA, ",") X(SEMI, ";") X(COLON, ":") X(QUESTION, "?") \
+  X(ARROW, "=>");
 
   switch(sym) {
     SYMBOLS

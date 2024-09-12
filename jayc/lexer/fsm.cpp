@@ -378,7 +378,11 @@ inline token symbol_token(std::istream &strm, location &curr) {
     case '*': return multi_matcher(symbol::MULTIPLY, {{'=', symbol::MULTIPLY_ASSIGN}}, strm, start, curr);
     // no case '/' (also no '//' or '/*')
     case '%': return multi_matcher(symbol::MODULO, {{'=', symbol::MODULO_ASSIGN}}, strm, start, curr);
-    case '=': return multi_matcher(symbol::ASSIGN, {{'=', symbol::EQUALS}}, strm, start, curr);
+    case '=': return multi_matcher(
+      symbol::ASSIGN,
+      {{'=', symbol::EQUALS}, {'>', symbol::ARROW}},
+      strm, start, curr
+    );
     case '!': return multi_matcher(symbol::NOT, {{'=', symbol::NOT_EQUALS}}, strm, start, curr);
     case '<': return multi_matcher(
       symbol::LESS_THAN,

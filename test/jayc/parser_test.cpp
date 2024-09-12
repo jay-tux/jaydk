@@ -17,6 +17,8 @@ using namespace jayc;
 using namespace jayc::lexer;
 using namespace jayc::parser;
 
+#define START_SUBCASE logger << info{ location{}, " ------ STARTED SUBCASE ------" }
+
 // NOTE: I know expanding std:: is not recommended, but otherwise this operator<< does not get picked up by doctest...
 namespace std {
 template<class T>
@@ -36,6 +38,43 @@ std::ostream &operator<<(std::ostream &target, const std::vector<T> &vec) { // N
   return target;
 }
 }
+
+bool operator==(const name &n1, const name &n2) {
+  if(n1.section != n2.section) return false;
+  if(n1.template_args.size() != n2.template_args.size()) return false;
+  for(size_t i = 0; i < n1.template_args.size(); ++i) {
+    if(n1.template_args[i] != n2.template_args[i]) return false;
+  }
+  if(n1.next.has_value() != n2.next.has_value()) return false;
+  if(n1.next.has_value() && *n1.next != *n2.next) return false;
+  return n1.is_array == n2.is_array;
+}
+
+namespace jayc::parser {
+std::ostream &operator<<(std::ostream &target, const name &n) {
+  target << n.section;
+  if(!n.template_args.empty()) {
+    target << "<";
+    auto it = n.template_args.cbegin();
+    target << *it;
+    ++it;
+    while(it != n.template_args.cend()) {
+      target << ", " << *it;
+      ++it;
+    }
+    target << ">";
+  }
+  if(n.next.has_value()) {
+    target << "::" << *n.next;
+  }
+  if(n.is_array) {
+    target << "[]";
+  }
+  return target;
+}
+}
+
+using jayc::parser::operator<<;
 
 class vec_source {
 public:
@@ -67,342 +106,22 @@ std::vector<::internal_::range_contained_t<R>> to_vec(R &&range) {
   return {std::ranges::begin(range), std::ranges::end(range)};
 }
 
+inline name single_name(const std::string &s) {
+  return name{.section = s, .template_args = {}, .next = std::nullopt, .is_array = false};
+}
+
+inline name linear_name(const std::vector<std::string> &sections) {
+  name res = single_name(sections[0]);
+  name *ptr = &res;
+  for(size_t i = 1; i < sections.size(); ++i) {
+    ptr->next = name{.section = sections[i], .template_args = {}, .next = std::nullopt, .is_array = false};
+    ptr = &*ptr->next;
+  }
+  return res;
+}
+
 TEST_SUITE("jayc - parser (parsing okay)") {
-  TEST_CASE("valid qualified names") {
-    // <identifier>(::<identifier>)*
-    logger.enable_throw_on_error();
-
-    SUBCASE("single identifier") {
-      const vec_source source({
-        {identifier{"a"}, {}}
-      });
-      auto it = token_it(source);
-      const auto res = parse_qname(it);
-      REQUIRE(res.has_value());
-      REQUIRE(res->sections.size() == 1);
-      CHECK(res->sections[0] == "a");
-      CHECK(is<eof>(it->actual));
-    }
-
-    SUBCASE("multiple identifiers") {
-      const vec_source source({
-        {identifier{"a"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"b"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"c"}, {}}
-      });
-      auto it = token_it(source);
-      const auto res = parse_qname(it);
-      REQUIRE(res.has_value());
-      CAPTURE(res->sections);
-      REQUIRE(res->sections.size() == 3);
-      CHECK(res->sections[0] == "a");
-      CHECK(res->sections[1] == "b");
-      CHECK(res->sections[2] == "c");
-      CHECK(is<eof>(it->actual));
-    }
-  }
-
-  TEST_CASE("valid type names") {
-    // <qname>(< <tname>(, <tname>)* >)? ([])?
-    logger.enable_throw_on_error();
-
-    SUBCASE("simple type name") {
-      // type
-      const vec_source source({
-        {identifier{"type"}, {}}
-      });
-      auto it = token_it(source);
-      auto res = parse_tname(it);
-      REQUIRE(res.has_value());
-      REQUIRE(res->base_name.sections.size() == 1);
-      CHECK(res->base_name.sections[0] == "type");
-      CHECK(res->template_args.size() == 0);
-      CHECK_FALSE(res->is_array);
-      CHECK(is<eof>(it->actual));
-    }
-
-    SUBCASE("simple qualified type name") {
-      // type::a::b
-      const vec_source source({
-        {identifier{"type"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"a"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"b"}, {}}
-      });
-      auto it = token_it(source);
-      auto res = parse_tname(it);
-      REQUIRE(res.has_value());
-      REQUIRE(res->base_name.sections.size() == 3);
-      CHECK(res->base_name.sections[0] == "type");
-      CHECK(res->base_name.sections[1] == "a");
-      CHECK(res->base_name.sections[2] == "b");
-      CHECK(res->template_args.size() == 0);
-      CHECK_FALSE(res->is_array);
-      CHECK(is<eof>(it->actual));
-    }
-
-    SUBCASE("simple qualified array type") {
-      // type::a::b[]
-      const vec_source source({
-        {identifier{"type"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"a"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"b"}, {}},
-        {symbol{symbol::BRACKET_OPEN}, {}},
-        {symbol{symbol::BRACKET_CLOSE}, {}}
-      });
-      auto it = token_it(source);
-      auto res = parse_tname(it);
-      REQUIRE(res.has_value());
-      REQUIRE(res->base_name.sections.size() == 3);
-      CHECK(res->base_name.sections[0] == "type");
-      CHECK(res->base_name.sections[1] == "a");
-      CHECK(res->base_name.sections[2] == "b");
-      CHECK(res->is_array);
-      CHECK(is<eof>(it->actual));
-    }
-
-    SUBCASE("single templated type name") {
-      // type<a>
-      const vec_source source({
-        {identifier{"type"}, {}},
-        {symbol{symbol::LESS_THAN}, {}},
-        {identifier{"a"}, {}},
-        {symbol{symbol::GREATER_THAN}, {}}
-      });
-      auto it = token_it(source);
-      auto res = parse_tname(it);
-      REQUIRE(res.has_value());
-      REQUIRE(res->base_name.sections.size() == 1);
-      CHECK(res->base_name.sections[0] == "type");
-      REQUIRE(res->template_args.size() == 1);
-      REQUIRE(res->template_args[0].base_name.sections.size() == 1);
-      CHECK(res->template_args[0].base_name.sections[0] == "a");
-      CHECK(res->template_args[0].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[0].is_array);
-      CHECK_FALSE(res->is_array);
-      CHECK(is<eof>(it->actual));
-    }
-
-    SUBCASE("multiple templated type name") {
-      // type<a, b>
-      const vec_source source({
-        {identifier{"type"}, {}},
-        {symbol{symbol::LESS_THAN}, {}},
-        {identifier{"a"}, {}},
-        {symbol{symbol::COMMA}, {}},
-        {identifier{"b"}, {}},
-        {symbol{symbol::GREATER_THAN}, {}}
-      });
-      auto it = token_it(source);
-      auto res = parse_tname(it);
-      REQUIRE(res.has_value());
-      // type
-      REQUIRE(res->base_name.sections.size() == 1);
-      CHECK(res->base_name.sections[0] == "type");
-      CHECK(res->template_args.size() == 2);
-      // <a,
-      REQUIRE(res->template_args[0].base_name.sections.size() == 1);
-      CHECK(res->template_args[0].base_name.sections[0] == "a");
-      CHECK(res->template_args[0].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[0].is_array);
-      // b>
-      REQUIRE(res->template_args[1].base_name.sections.size() == 1);
-      CHECK(res->template_args[1].base_name.sections[0] == "b");
-      CHECK(res->template_args[1].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[1].is_array);
-      CHECK_FALSE(res->is_array);
-      CHECK(is<eof>(it->actual));
-    }
-
-    SUBCASE("multiple templated qualified type name") {
-      // type::a<b, c, d>
-      const vec_source source({
-        {identifier{"type"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"a"}, {}},
-        {symbol{symbol::LESS_THAN}, {}},
-        {identifier{"b"}, {}},
-        {symbol{symbol::COMMA}, {}},
-        {identifier{"c"}, {}},
-        {symbol{symbol::COMMA}, {}},
-        {identifier{"d"}, {}},
-        {symbol{symbol::GREATER_THAN}, {}}
-      });
-      auto it = token_it(source);
-      auto res = parse_tname(it);
-      REQUIRE(res.has_value());
-      // type::a
-      REQUIRE(res->base_name.sections.size() == 2);
-      //    type::
-      CHECK(res->base_name.sections[0] == "type");
-      //    a
-      CHECK(res->base_name.sections[1] == "a");
-
-      CHECK(res->template_args.size() == 3);
-
-      // <b,
-      REQUIRE(res->template_args[0].base_name.sections.size() == 1);
-      CHECK(res->template_args[0].base_name.sections[0] == "b");
-      CHECK(res->template_args[0].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[0].is_array);
-
-      // c,
-      REQUIRE(res->template_args[1].base_name.sections.size() == 1);
-      CHECK(res->template_args[1].base_name.sections[0] == "c");
-      CHECK(res->template_args[1].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[1].is_array);
-
-      // d>
-      REQUIRE(res->template_args[2].base_name.sections.size() == 1);
-      CHECK(res->template_args[2].base_name.sections[0] == "d");
-      CHECK(res->template_args[2].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[2].is_array);
-
-      CHECK_FALSE(res->is_array);
-      CHECK(is<eof>(it->actual));
-    }
-
-    SUBCASE("mixed non-array and array template arguments") {
-      // type<a, b::c>
-      const vec_source source({
-        {identifier{"type"}, {}},
-        {symbol{symbol::LESS_THAN}, {}},
-        {identifier{"a"}, {}},
-        {symbol{symbol::COMMA}, {}},
-        {identifier{"b"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"c"}, {}},
-          {symbol{symbol::GREATER_THAN}, {}}
-      });
-
-      auto it = token_it(source);
-      auto res = parse_tname(it);
-      REQUIRE(res.has_value());
-      // type
-      REQUIRE(res->base_name.sections.size() == 1);
-      CHECK(res->base_name.sections[0] == "type");
-      CHECK(res->template_args.size() == 2);
-      // <a,
-      REQUIRE(res->template_args[0].base_name.sections.size() == 1);
-      CHECK(res->template_args[0].base_name.sections[0] == "a");
-      CHECK(res->template_args[0].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[0].is_array);
-      // b::c>
-      REQUIRE(res->template_args[1].base_name.sections.size() == 2);
-      //    b::
-      CHECK(res->template_args[1].base_name.sections[0] == "b");
-      //    c
-      CHECK(res->template_args[1].base_name.sections[1] == "c");
-      CHECK(res->template_args[1].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[1].is_array);
-      CHECK_FALSE(res->is_array);
-      CHECK(is<eof>(it->actual));
-    }
-
-    SUBCASE("crazy nested type name") {
-      // ns::type<ns::nested::type, ns::type2<std::string>[], ns::home[], ns::deeply<nested<type[]>>>
-
-      const vec_source source({
-        {identifier{"ns"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"type"}, {}},
-        {symbol{symbol::LESS_THAN}, {}},
-        {identifier{"ns"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"nested"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"type"}, {}},
-        {symbol{symbol::COMMA}, {}},
-        {identifier{"ns"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"type2"}, {}},
-        {symbol{symbol::LESS_THAN}, {}},
-        {identifier{"std"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"string"}, {}},
-        {symbol{symbol::GREATER_THAN}, {}},
-        {symbol::BRACKET_OPEN, {}},
-        {symbol::BRACKET_CLOSE, {}},
-        {symbol{symbol::COMMA}, {}},
-        {identifier{"ns"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"home"}, {}},
-        {symbol::BRACKET_OPEN, {}},
-        {symbol::BRACKET_CLOSE, {}},
-        {symbol{symbol::COMMA}, {}},
-        {identifier{"ns"}, {}},
-        {symbol{symbol::NAMESPACE}, {}},
-        {identifier{"deeply"}, {}},
-        {symbol{symbol::LESS_THAN}, {}},
-        {identifier{"nested"}, {}},
-        {symbol{symbol::LESS_THAN}, {}},
-        {identifier{"type"}, {}},
-        {symbol::BRACKET_OPEN, {}},
-        {symbol::BRACKET_CLOSE, {}},
-        {symbol{symbol::GREATER_THAN}, {}},
-        {symbol{symbol::GREATER_THAN}, {}},
-        {symbol{symbol::GREATER_THAN}, {}}
-      });
-
-      auto it = token_it(source);
-      auto res = parse_tname(it);
-      REQUIRE(res.has_value());
-      // ns::type
-      REQUIRE(res->base_name.sections.size() == 2);
-      CHECK(res->base_name.sections[0] == "ns");
-      CHECK(res->base_name.sections[1] == "type");
-      CHECK(res->template_args.size() == 4);
-      CHECK_FALSE(res->is_array);
-      //    ns::nested::type,
-      REQUIRE(res->template_args[0].base_name.sections.size() == 3);
-      CHECK(res->template_args[0].base_name.sections[0] == "ns");
-      CHECK(res->template_args[0].base_name.sections[1] == "nested");
-      CHECK(res->template_args[0].base_name.sections[2] == "type");
-      CHECK(res->template_args[0].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[0].is_array);
-      //    ns::type2<>[],
-      REQUIRE(res->template_args[1].base_name.sections.size() == 2);
-      CHECK(res->template_args[1].base_name.sections[0] == "ns");
-      CHECK(res->template_args[1].base_name.sections[1] == "type2");
-      CHECK(res->template_args[1].is_array);
-      //        std::string
-      REQUIRE(res->template_args[1].template_args.size() == 1);
-      CHECK(res->template_args[1].template_args[0].base_name.sections.size() == 2);
-      CHECK(res->template_args[1].template_args[0].base_name.sections[0] == "std");
-      CHECK(res->template_args[1].template_args[0].base_name.sections[1] == "string");
-      CHECK(res->template_args[1].template_args[0].template_args.size() == 0);
-      CHECK_FALSE(res->template_args[1].template_args[0].is_array);
-      //    ns::home[],
-      REQUIRE(res->template_args[2].base_name.sections.size() == 2);
-      CHECK(res->template_args[2].base_name.sections[0] == "ns");
-      CHECK(res->template_args[2].base_name.sections[1] == "home");
-      CHECK(res->template_args[2].template_args.size() == 0);
-      CHECK(res->template_args[2].is_array);
-      //    ns::deeply<>
-      REQUIRE(res->template_args[3].base_name.sections.size() == 2);
-      CHECK(res->template_args[3].base_name.sections[0] == "ns");
-      CHECK(res->template_args[3].base_name.sections[1] == "deeply");
-      CHECK_FALSE(res->template_args[3].is_array);
-      //        nested<>
-      REQUIRE(res->template_args[3].template_args.size() == 1);
-      CHECK(res->template_args[3].template_args[0].base_name.sections.size() == 1);
-      CHECK(res->template_args[3].template_args[0].base_name.sections[0] == "nested");
-      CHECK_FALSE(res->template_args[3].template_args[0].is_array);
-      //            type[]
-      CHECK(res->template_args[3].template_args[0].template_args.size() == 1);
-      CHECK(res->template_args[3].template_args[0].template_args[0].base_name.sections.size() == 1);
-      CHECK(res->template_args[3].template_args[0].template_args[0].base_name.sections[0] == "type");
-      CHECK(res->template_args[3].template_args[0].template_args[0].template_args.size() == 0);
-      CHECK(res->template_args[3].template_args[0].template_args[0].is_array);
-
-      CHECK(is<eof>(it->actual));
-    }
-  }
+  // TODO: valid names
 
   TEST_CASE("valid expressions") {
     logger.enable_throw_on_error();
@@ -470,10 +189,16 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       auto res = parse_expr(it);
       REQUIRE(res.has_value());
       CHECK(is<name_expr>(res->content));
-      CHECK(as<name_expr>(res->content).name.sections.size() == 3);
-      CHECK(as<name_expr>(res->content).name.sections[0] == "a");
-      CHECK(as<name_expr>(res->content).name.sections[1] == "b");
-      CHECK(as<name_expr>(res->content).name.sections[2] == "c");
+      CHECK(as<name_expr>(res->content).actual == name {
+        .section = "a", .template_args = {},
+        .next = name {
+          .section = "b", .template_args = {},
+          .next = name {
+            .section = "c", .template_args = {},
+            .next = std::nullopt, .is_array = false
+          }, .is_array = false
+        }, .is_array = false
+      });
 
       CHECK(is<eof>(it->actual));
     }
@@ -572,8 +297,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
         const auto &right = *as<binary_expr>(res->content).right;
         CHECK(is<name_expr>(right.content));
-        CHECK(as<name_expr>(right.content).name.sections.size() == 1);
-        CHECK(as<name_expr>(right.content).name.sections[0] == "x");
+        CHECK(as<name_expr>(right.content).actual == single_name("x"));
 
         CHECK(is<eof>(it->actual));
       }
@@ -598,13 +322,11 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
       const auto &true_expr = *as<ternary_expr>(res->content).true_expr;
       CHECK(is<name_expr>(true_expr.content));
-      CHECK(as<name_expr>(true_expr.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(true_expr.content).name.sections[0] == "x");
+      CHECK(as<name_expr>(true_expr.content).actual == single_name("x"));
 
       const auto &false_expr = *as<ternary_expr>(res->content).false_expr;
       CHECK(is<name_expr>(false_expr.content));
-      CHECK(as<name_expr>(false_expr.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(false_expr.content).name.sections[0] == "y");
+      CHECK(as<name_expr>(false_expr.content).actual == single_name("y"));
 
       CHECK(is<eof>(it->actual));
     }
@@ -638,13 +360,11 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
       const auto &left = *as<binary_expr>(res->content).left;
       CHECK(is<name_expr>(left.content));
-      CHECK(as<name_expr>(left.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(left.content).name.sections[0] == "x");
+      CHECK(as<name_expr>(left.content).actual == single_name("x"));
 
       const auto &right = *as<binary_expr>(res->content).right;
       CHECK(is<name_expr>(right.content));
-      CHECK(as<name_expr>(right.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(right.content).name.sections[0] == "y");
+      CHECK(as<name_expr>(right.content).actual == single_name("y"));
 
       CHECK(is<eof>(it->actual));
     }
@@ -759,8 +479,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       CHECK(is<name_expr>(call->content));
       // ReSharper disable once CppUseStructuredBinding
       const auto &name = as<name_expr>(call->content);
-      CHECK(name.name.sections.size() == 1);
-      CHECK(name.name.sections[0] == "a");
+      CHECK(name.actual == single_name("a"));
       CHECK(args.empty());
 
       CHECK(is<eof>(it->actual));
@@ -782,14 +501,12 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       CHECK(is<name_expr>(call->content));
       // ReSharper disable once CppUseStructuredBinding
       const auto &name = as<name_expr>(call->content);
-      CHECK(name.name.sections.size() == 1);
-      CHECK(name.name.sections[0] == "a");
+      CHECK(name.actual == single_name("a"));
       CHECK(args.size() == 1);
       CHECK(is<name_expr>(args[0].content));
       // ReSharper disable once CppUseStructuredBinding
       const auto &arg = as<name_expr>(args[0].content);
-      CHECK(arg.name.sections.size() == 1);
-      CHECK(arg.name.sections[0] == "b");
+      CHECK(arg.actual == single_name("b"));
 
       CHECK(is<eof>(it->actual));
     }
@@ -821,16 +538,13 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       CHECK(is<name_expr>(call->content));
       // ReSharper disable once CppUseStructuredBinding
       const auto &name = as<name_expr>(call->content);
-      CHECK(name.name.sections.size() == 1);
-      CHECK(name.name.sections[0] == "method");
+      CHECK(name.actual == single_name("method"));
       CHECK(args.size() == 3);
 
       REQUIRE(is<name_expr>(args[0].content));
       // ReSharper disable once CppUseStructuredBinding
       const auto &arg1 = as<name_expr>(args[0].content);
-      CHECK(arg1.name.sections.size() == 2);
-      CHECK(arg1.name.sections[0] == "arg");
-      CHECK(arg1.name.sections[1] == "no1");
+      CHECK(arg1.actual == linear_name({"arg", "no1"}));
 
       REQUIRE(is<binary_expr>(args[1].content));
       // ReSharper disable once CppUseStructuredBinding
@@ -896,8 +610,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
       const auto &vec = as<binary_expr>(shift_expr->content).left;
       REQUIRE(is<name_expr>(vec->content));
-      CHECK(as<name_expr>(vec->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(vec->content).name.sections[0] == "vec");
+      CHECK(as<name_expr>(vec->content).actual == single_name("vec"));
 
       const auto &two = as<binary_expr>(shift_expr->content).right;
       REQUIRE(is<literal_expr<int64_t>>(two->content));
@@ -914,8 +627,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
       const auto &get_int_arr = as<call_expr>(get_int_arr_call->content).call;
       REQUIRE(is<name_expr>(get_int_arr->content));
-      CHECK(as<name_expr>(get_int_arr->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(get_int_arr->content).name.sections[0] == "get_int_arr");
+      CHECK(as<name_expr>(get_int_arr->content).actual == single_name("get_int_arr"));
 
       REQUIRE(as<call_expr>(get_int_arr_call->content).args.size() == 1);
       const auto &get_int_arr_args = as<call_expr>(get_int_arr_call->content).args;
@@ -953,18 +665,16 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &member2 = as<member_expr>(call.call->content);
       CHECK(member2.member == "method");
       REQUIRE(is<name_expr>(member2.base->content));
-      CHECK(as<name_expr>(member2.base->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(member2.base->content).name.sections[0] == "cls");
+      CHECK(as<name_expr>(member2.base->content).actual == single_name("cls"));
       REQUIRE(call.args.size() == 1);
       REQUIRE(is<name_expr>(call.args[0].content));
-      CHECK(as<name_expr>(call.args[0].content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call.args[0].content).name.sections[0] == "arg");
+      CHECK(as<name_expr>(call.args[0].content).actual == single_name("arg"));
     }
 
     SUBCASE("complex expression") {
+      START_SUBCASE;
       // (look, I know it's a senseless expression, but oh well... it's a nice nested test-case)
       // make_call() ? arr[12 - other_var] * 5 : std::test(_internal::arr()[6]) ? true * 12 : false << 14;
-      // TODO
       const vec_source source({
         {identifier{"make_call"}, {}}, {symbol::PAREN_OPEN, {}},
         {symbol::PAREN_CLOSE, {}}, {symbol::QUESTION, {}}, {identifier{"arr"}, {}},
@@ -989,8 +699,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(root.cond->content));
       const auto &make_call = as<call_expr>(root.cond->content);
       REQUIRE(is<name_expr>(make_call.call->content));
-      CHECK(as<name_expr>(make_call.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(make_call.call->content).name.sections[0] == "make_call");
+      CHECK(as<name_expr>(make_call.call->content).actual == single_name("make_call"));
       CHECK(make_call.args.empty());
 
       REQUIRE(is<binary_expr>(root.true_expr->content));
@@ -1000,8 +709,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &arr = as<index_expr>(true_expr.left->content);
       REQUIRE(is<name_expr>(arr.base->content));
       const auto &arr_name = as<name_expr>(arr.base->content);
-      CHECK(arr_name.name.sections.size() == 1);
-      CHECK(arr_name.name.sections[0] == "arr");
+      CHECK(arr_name.actual == single_name("arr"));
 
       REQUIRE(is<binary_expr>(arr.index->content));
       const auto &arr_minus = as<binary_expr>(arr.index->content);
@@ -1010,8 +718,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
       REQUIRE(is<name_expr>(arr_minus.right->content));
       const auto &other_var = as<name_expr>(arr_minus.right->content);
-      CHECK(other_var.name.sections.size() == 1);
-      CHECK(other_var.name.sections[0] == "other_var");
+      CHECK(other_var.actual == single_name("other_var"));
 
       CHECK(arr_minus.op == binary_op::SUBTRACT);
 
@@ -1027,9 +734,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &std_test_call = as<call_expr>(false_expr.cond->content);
       REQUIRE(is<name_expr>(std_test_call.call->content));
       const auto &std_test = as<name_expr>(std_test_call.call->content);
-      CHECK(std_test.name.sections.size() == 2);
-      CHECK(std_test.name.sections[0] == "std");
-      CHECK(std_test.name.sections[1] == "test");
+      CHECK(std_test.actual == linear_name({"std", "test"}));
 
       REQUIRE(std_test_call.args.size() == 1);
       REQUIRE(is<index_expr>(std_test_call.args[0].content));
@@ -1039,9 +744,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &internal_arr_call = as<call_expr>(internal_arr_indexing.base->content);
       REQUIRE(is<name_expr>(internal_arr_call.call->content));
       const auto &internal_arr = as<name_expr>(internal_arr_call.call->content);
-      CHECK(internal_arr.name.sections.size() == 2);
-      CHECK(internal_arr.name.sections[0] == "_internal");
-      CHECK(internal_arr.name.sections[1] == "arr");
+      CHECK(internal_arr.actual == linear_name({"_internal", "arr"}));
       CHECK(internal_arr_call.args.empty());
 
       REQUIRE(is<literal_expr<int64_t>>(internal_arr_indexing.index->content));
@@ -1116,11 +819,9 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &mul1 = as_bin(*add1.right);
       CHECK(mul1.op == binary_op::MULTIPLY);
       REQUIRE(is_name(*mul1.left));
-      CHECK(as_name(*mul1.left).name.sections.size() == 1);
-      CHECK(as_name(*mul1.left).name.sections[0] == "x");
+      CHECK(as_name(*mul1.left).actual == single_name("x"));
       REQUIRE(is_name(*mul1.right));
-      CHECK(as_name(*mul1.right).name.sections.size() == 1);
-      CHECK(as_name(*mul1.right).name.sections[0] == "x");
+      CHECK(as_name(*mul1.right).actual == single_name("x"));
 
       // 1.0f/2 * (1 / (1 - i * x) + 1 / (1 + i * x))
       REQUIRE(is_bin(*cmp_eq.right));
@@ -1155,11 +856,9 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &mul3 = as_bin(*sub1.right);
       CHECK(mul3.op == binary_op::MULTIPLY);
       REQUIRE(is_name(*mul3.left));
-      CHECK(as_name(*mul3.left).name.sections.size() == 1);
-      CHECK(as_name(*mul3.left).name.sections[0] == "i");
+      CHECK(as_name(*mul3.left).actual == single_name("i"));
       REQUIRE(is_name(*mul3.right));
-      CHECK(as_name(*mul3.right).name.sections.size() == 1);
-      CHECK(as_name(*mul3.right).name.sections[0] == "x");
+      CHECK(as_name(*mul3.right).actual == single_name("x"));
       //        1 / (1 + i * x)
       REQUIRE(is_bin(*add2.right));
       const auto &div4 = as_bin(*add2.right);
@@ -1177,11 +876,9 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &mul4 = as_bin(*add3.right);
       CHECK(mul4.op == binary_op::MULTIPLY);
       REQUIRE(is_name(*mul4.left));
-      CHECK(as_name(*mul4.left).name.sections.size() == 1);
-      CHECK(as_name(*mul4.left).name.sections[0] == "i");
+      CHECK(as_name(*mul4.left).actual == single_name("i"));
       REQUIRE(is_name(*mul4.right));
-      CHECK(as_name(*mul4.right).name.sections.size() == 1);
-      CHECK(as_name(*mul4.right).name.sections[0] == "x");
+      CHECK(as_name(*mul4.right).actual == single_name("x"));
     }
   }
 
@@ -1225,8 +922,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       CHECK(as<return_stmt>(res->content).value.has_value());
       const auto &ret_val = *as<return_stmt>(res->content).value;
       REQUIRE(is<name_expr>(ret_val.content));
-      CHECK(as<name_expr>(ret_val.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(ret_val.content).name.sections[0] == "x");
+      CHECK(as<name_expr>(ret_val.content).actual == single_name("x"));
       CHECK(is<eof>(it->actual));
     }
 
@@ -1273,8 +969,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(expr1.content));
       const auto &call1 = as<call_expr>(expr1.content);
       REQUIRE(is<name_expr>(call1.call->content));
-      CHECK(as<name_expr>(call1.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call1.call->content).name.sections[0] == "method");
+      CHECK(as<name_expr>(call1.call->content).actual == single_name("method"));
       CHECK(call1.args.empty());
 
       // #2 -> 12;
@@ -1336,8 +1031,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<assign_stmt>(res->content));
       const auto &assign1 = as<assign_stmt>(res->content);
       REQUIRE(is<name_expr>(assign1.lvalue.content));
-      CHECK(as<name_expr>(assign1.lvalue.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(assign1.lvalue.content).name.sections[0] == "x");
+      CHECK(as<name_expr>(assign1.lvalue.content).actual == single_name("x"));
       REQUIRE(is<literal_expr<int64_t>>(assign1.value.content));
       CHECK(as<literal_expr<int64_t>>(assign1.value.content).value == 42);
 
@@ -1349,8 +1043,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<index_expr>(assign2.lvalue.content));
       const auto &idx_expr = as<index_expr>(assign2.lvalue.content);
       REQUIRE(is<name_expr>(idx_expr.base->content));
-      CHECK(as<name_expr>(idx_expr.base->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(idx_expr.base->content).name.sections[0] == "arr");
+      CHECK(as<name_expr>(idx_expr.base->content).actual == single_name("arr"));
       REQUIRE(is<literal_expr<int64_t>>(idx_expr.index->content));
       CHECK(as<literal_expr<int64_t>>(idx_expr.index->content).value == 3);
       REQUIRE(is<literal_expr<int64_t>>(assign2.value.content));
@@ -1441,8 +1134,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(true1.expr.content));
       const auto &call1 = as<call_expr>(true1.expr.content);
       REQUIRE(is<name_expr>(call1.call->content));
-      CHECK(as<name_expr>(call1.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call1.call->content).name.sections[0] == "do_test");
+      CHECK(as<name_expr>(call1.call->content).actual == single_name("do_test"));
       CHECK(call1.args.empty());
       CHECK(!if2.false_block.has_value());
 
@@ -1455,17 +1147,14 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &eq = as<binary_expr>(if3.condition.content);
       CHECK(eq.op == binary_op::EQUAL);
       REQUIRE(is<name_expr>(eq.left->content));
-      CHECK(as<name_expr>(eq.left->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(eq.left->content).name.sections[0] == "x");
+      CHECK(as<name_expr>(eq.left->content).actual == single_name("x"));
       REQUIRE(is<name_expr>(eq.right->content));
-      CHECK(as<name_expr>(eq.right->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(eq.right->content).name.sections[0] == "y");
+      CHECK(as<name_expr>(eq.right->content).actual == single_name("y"));
       REQUIRE(is<return_stmt>(if3.true_block->content));
       const auto &ret1 = as<return_stmt>(if3.true_block->content);
       REQUIRE(ret1.value.has_value());
       REQUIRE(is<name_expr>(ret1.value->content));
-      CHECK(as<name_expr>(ret1.value->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(ret1.value->content).name.sections[0] == "x");
+      CHECK(as<name_expr>(ret1.value->content).actual == single_name("x"));
       REQUIRE(if3.false_block.has_value());
       REQUIRE(is<block>(if3.false_block.value()->content));
       const auto &false1 = as<block>(if3.false_block.value()->content);
@@ -1475,8 +1164,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(expr1.expr.content));
       const auto &call2 = as<call_expr>(expr1.expr.content);
       REQUIRE(is<name_expr>(call2.call->content));
-      CHECK(as<name_expr>(call2.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call2.call->content).name.sections[0] == "do_something");
+      CHECK(as<name_expr>(call2.call->content).actual == single_name("do_something"));
       CHECK(call2.args.empty());
 
       // #4 -> if(x != y) { do_something(); } else return y;
@@ -1488,11 +1176,9 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &neq = as<binary_expr>(if4.condition.content);
       CHECK(neq.op == binary_op::NOT_EQUAL);
       REQUIRE(is<name_expr>(neq.left->content));
-      CHECK(as<name_expr>(neq.left->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(neq.left->content).name.sections[0] == "x");
+      CHECK(as<name_expr>(neq.left->content).actual == single_name("x"));
       REQUIRE(is<name_expr>(neq.right->content));
-      CHECK(as<name_expr>(neq.right->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(neq.right->content).name.sections[0] == "y");
+      CHECK(as<name_expr>(neq.right->content).actual == single_name("y"));
       REQUIRE(is<block>(if4.true_block->content));
       const auto &true2 = as<block>(if4.true_block->content);
       REQUIRE(true2.statements.size() == 1);
@@ -1501,16 +1187,14 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(expr2.expr.content));
       const auto &call3 = as<call_expr>(expr2.expr.content);
       REQUIRE(is<name_expr>(call3.call->content));
-      CHECK(as<name_expr>(call3.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call3.call->content).name.sections[0] == "do_something");
+      CHECK(as<name_expr>(call3.call->content).actual == single_name("do_something"));
       CHECK(call3.args.empty());
       REQUIRE(if4.false_block.has_value());
       REQUIRE(is<return_stmt>(if4.false_block.value()->content));
       const auto &ret2 = as<return_stmt>(if4.false_block.value()->content);
       REQUIRE(ret2.value.has_value());
       REQUIRE(is<name_expr>(ret2.value->content));
-      CHECK(as<name_expr>(ret2.value->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(ret2.value->content).name.sections[0] == "y");
+      CHECK(as<name_expr>(ret2.value->content).actual == single_name("y"));
 
       // #5 -> if(a) b(); else if(c) d(); else e();
       res = parse_stmt(it);
@@ -1518,30 +1202,26 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<if_stmt>(res->content));
       const auto &if5 = as<if_stmt>(res->content);
       REQUIRE(is<name_expr>(if5.condition.content));
-      CHECK(as<name_expr>(if5.condition.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(if5.condition.content).name.sections[0] == "a");
+      CHECK(as<name_expr>(if5.condition.content).actual == single_name("a"));
       REQUIRE(is<expr_stmt>(if5.true_block->content));
       const auto &true3 = as<expr_stmt>(if5.true_block->content);
       REQUIRE(is<call_expr>(true3.expr.content));
       const auto &call4 = as<call_expr>(true3.expr.content);
       REQUIRE(is<name_expr>(call4.call->content));
-      CHECK(as<name_expr>(call4.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call4.call->content).name.sections[0] == "b");
+      CHECK(as<name_expr>(call4.call->content).actual == single_name("b"));
       CHECK(call4.args.empty());
       CAPTURE(*it);
       REQUIRE(if5.false_block.has_value());
       REQUIRE(is<if_stmt>(if5.false_block.value()->content));
       const auto &if6 = as<if_stmt>(if5.false_block.value()->content);
       REQUIRE(is<name_expr>(if6.condition.content));
-      CHECK(as<name_expr>(if6.condition.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(if6.condition.content).name.sections[0] == "c");
+      CHECK(as<name_expr>(if6.condition.content).actual == single_name("c"));
       REQUIRE(is<expr_stmt>(if6.true_block->content));
       const auto &true4 = as<expr_stmt>(if6.true_block->content);
       REQUIRE(is<call_expr>(true4.expr.content));
       const auto &call5 = as<call_expr>(true4.expr.content);
       REQUIRE(is<name_expr>(call5.call->content));
-      CHECK(as<name_expr>(call5.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call5.call->content).name.sections[0] == "d");
+      CHECK(as<name_expr>(call5.call->content).actual == single_name("d"));
       CHECK(call5.args.empty());
       REQUIRE(if6.false_block.has_value());
       REQUIRE(is<expr_stmt>(if6.false_block.value()->content));
@@ -1549,8 +1229,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(false2.expr.content));
       const auto &call6 = as<call_expr>(false2.expr.content);
       REQUIRE(is<name_expr>(call6.call->content));
-      CHECK(as<name_expr>(call6.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call6.call->content).name.sections[0] == "e");
+      CHECK(as<name_expr>(call6.call->content).actual == single_name("e"));
       CHECK(call6.args.empty());
 
       // #6 -> if(a) if(b) c(); else d();
@@ -1559,20 +1238,17 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<if_stmt>(res->content));
       const auto &if7 = as<if_stmt>(res->content);
       REQUIRE(is<name_expr>(if7.condition.content));
-      CHECK(as<name_expr>(if7.condition.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(if7.condition.content).name.sections[0] == "a");
+      CHECK(as<name_expr>(if7.condition.content).actual == single_name("a"));
       REQUIRE(is<if_stmt>(if7.true_block->content));
       const auto &if8 = as<if_stmt>(if7.true_block->content);
       REQUIRE(is<name_expr>(if8.condition.content));
-      CHECK(as<name_expr>(if8.condition.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(if8.condition.content).name.sections[0] == "b");
+      CHECK(as<name_expr>(if8.condition.content).actual == single_name("b"));
       REQUIRE(is<expr_stmt>(if8.true_block->content));
       const auto &true5 = as<expr_stmt>(if8.true_block->content);
       REQUIRE(is<call_expr>(true5.expr.content));
       const auto &call7 = as<call_expr>(true5.expr.content);
       REQUIRE(is<name_expr>(call7.call->content));
-      CHECK(as<name_expr>(call7.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call7.call->content).name.sections[0] == "c");
+      CHECK(as<name_expr>(call7.call->content).actual == single_name("c"));
       CHECK(call7.args.empty());
       REQUIRE(if8.false_block.has_value());
       REQUIRE(is<expr_stmt>(if8.false_block.value()->content));
@@ -1580,8 +1256,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(false3.expr.content));
       const auto &call8 = as<call_expr>(false3.expr.content);
       REQUIRE(is<name_expr>(call8.call->content));
-      CHECK(as<name_expr>(call8.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call8.call->content).name.sections[0] == "d");
+      CHECK(as<name_expr>(call8.call->content).actual == single_name("d"));
       CHECK(call8.args.empty());
       CHECK(!if7.false_block.has_value());
 
@@ -1632,8 +1307,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &cond1 = as<binary_expr>(for1.condition.content);
       CHECK(cond1.op == binary_op::LESS);
       REQUIRE(is<name_expr>(cond1.left->content));
-      CHECK(as<name_expr>(cond1.left->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(cond1.left->content).name.sections[0] == "x");
+      CHECK(as<name_expr>(cond1.left->content).actual == single_name("x"));
       REQUIRE(is<literal_expr<int64_t>>(cond1.right->content));
       CHECK(as<literal_expr<int64_t>>(cond1.right->content).value == 10);
       REQUIRE(is<unary_expr>(for1.update.content));
@@ -1644,8 +1318,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(block1.expr.content));
       const auto &call1 = as<call_expr>(block1.expr.content);
       REQUIRE(is<name_expr>(call1.call->content));
-      CHECK(as<name_expr>(call1.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call1.call->content).name.sections[0] == "call");
+      CHECK(as<name_expr>(call1.call->content).actual == single_name("call"));
       CHECK(call1.args.empty());
 
       // #2 -> for(var x = 0; x < 10; x++) arr_check(arr[i]);
@@ -1662,8 +1335,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &cond2 = as<binary_expr>(for2.condition.content);
       CHECK(cond2.op == binary_op::LESS);
       REQUIRE(is<name_expr>(cond2.left->content));
-      CHECK(as<name_expr>(cond2.left->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(cond2.left->content).name.sections[0] == "x");
+      CHECK(as<name_expr>(cond2.left->content).actual == single_name("x"));
       REQUIRE(is<literal_expr<int64_t>>(cond2.right->content));
       CHECK(as<literal_expr<int64_t>>(cond2.right->content).value == 10);
       REQUIRE(is<unary_expr>(for2.update.content));
@@ -1674,17 +1346,14 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(is<call_expr>(block2.expr.content));
       const auto &call2 = as<call_expr>(block2.expr.content);
       REQUIRE(is<name_expr>(call2.call->content));
-      CHECK(as<name_expr>(call2.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call2.call->content).name.sections[0] == "arr_check");
+      CHECK(as<name_expr>(call2.call->content).actual == single_name("arr_check"));
       REQUIRE(call2.args.size() == 1);
       REQUIRE(is<index_expr>(call2.args[0].content));
       const auto &idx_expr = as<index_expr>(call2.args[0].content);
       REQUIRE(is<name_expr>(idx_expr.base->content));
-      CHECK(as<name_expr>(idx_expr.base->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(idx_expr.base->content).name.sections[0] == "arr");
+      CHECK(as<name_expr>(idx_expr.base->content).actual == single_name("arr"));
       REQUIRE(is<name_expr>(idx_expr.index->content));
-      CHECK(as<name_expr>(idx_expr.index->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(idx_expr.index->content).name.sections[0] == "i");
+      CHECK(as<name_expr>(idx_expr.index->content).actual == single_name("i"));
 
       // #3 -> for(x: arr) arr_check(x);
       res = parse_stmt(it);
@@ -1693,15 +1362,13 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &for3 = as<for_each_stmt>(res->content);
       CHECK(for3.binding == "x");
       REQUIRE(is<name_expr>(for3.collection.content));
-      CHECK(as<name_expr>(for3.collection.content).name.sections.size() == 1);
-      CHECK(as<name_expr>(for3.collection.content).name.sections[0] == "arr");
+      CHECK(as<name_expr>(for3.collection.content).actual == single_name("arr"));
       REQUIRE(is<expr_stmt>(for3.block->content));
       const auto &block3 = as<expr_stmt>(for3.block->content);
       REQUIRE(is<call_expr>(block3.expr.content));
       const auto &call3 = as<call_expr>(block3.expr.content);
       REQUIRE(is<name_expr>(call3.call->content));
-      CHECK(as<name_expr>(call3.call->content).name.sections.size() == 1);
-      CHECK(as<name_expr>(call3.call->content).name.sections[0] == "arr_check");
+      CHECK(as<name_expr>(call3.call->content).actual == single_name("arr_check"));
       REQUIRE(call3.args.size() == 1);
       REQUIRE(is<name_expr>(call3.args[0].content));
 
@@ -1773,34 +1440,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 }
 
 TEST_SUITE("jayc - parser (parsing fails)") {
-  TEST_CASE("invalid qualified names") {
-    logger.disable_throw_on_error();
-
-    SUBCASE("no identifier") {
-      const vec_source source({
-        {{symbol::NAMESPACE}, {}}
-      });
-      auto it = token_it(source);
-      const auto res = parse_qname(it);
-      REQUIRE(!res.has_value());
-    }
-
-    SUBCASE("qname ends with ::") {
-      const vec_source source({
-        {identifier{"a"}, {"", 1, 1}},
-        {symbol{symbol::NAMESPACE}, {"", 1, 2}},
-        {identifier{"b"}, {"", 1, 3}},
-        {symbol{symbol::NAMESPACE}, {"", 1, 3}},
-        {identifier{"c"}, {"", 1, 4}},
-        {symbol{symbol::NAMESPACE}, {"", 1, 4}}
-      });
-      auto it = token_it(source);
-      const auto res = parse_qname(it);
-      REQUIRE(!res.has_value());
-    }
-  }
-
-  // TODO: invalid type name
+  // TODO: invalid names
 
   // TODO: invalid expressions
 

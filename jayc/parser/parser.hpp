@@ -56,8 +56,11 @@ private:
 };
 
 ast build_ast(token_it &iterator);
-std::optional<qualified_name> parse_qname(token_it &iterator);
-std::optional<type_name> parse_tname(token_it &iterator);
+std::optional<name> parse_full_name(token_it &iterator, bool allow_brackets);
+
+inline std::optional<name> parse_qualified_name(token_it &iterator) { return parse_full_name(iterator, false); }
+inline std::optional<name> parse_type_name(token_it &iterator) { return parse_full_name(iterator, true); }
+
 std::optional<expression> parse_expr(token_it &iterator);
 std::optional<statement> parse_stmt(token_it &iterator);
 std::optional<declaration> parse_decl(token_it &iterator);

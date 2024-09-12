@@ -28,19 +28,27 @@ enum struct binary_op {
   BOOL_AND, BOOL_OR, BIT_AND, BIT_OR, XOR, SHIFT_LEFT, SHIFT_RIGHT
 };
 
-struct qualified_name {
-  // qname: <name>(::<name>)*
-  std::vector<std::string> sections;
-};
+// struct qualified_name {
+//   // qname: <name>(::<name>)*
+//   std::vector<std::string> sections;
+// };
+//
+// struct type_name {
+//   // tname: <qname>(<<tname>(,<tname>)*>)?([])?
+//   // TODO: update to be:
+//   //    tname: <tname_no_arr> ([])?
+//   //    tname_no_arr: <qname>(<<tname>(, <tname>)*>(::<tname_no_arr>)?)?
+//   // (for things like std::vector<std::string>::iterator;
+//   qualified_name base_name;
+//   std::vector<type_name> template_args;
+//   bool is_array;
+// };
 
-struct type_name {
-  // tname: <qname>(<<tname>(,<tname>)*>)?([])?
-  // TODO: update to be:
-  //    tname: <tname_no_arr> ([])?
-  //    tname_no_arr: <qname>(<<tname>(, <tname>)*>(::<tname_no_arr>)?)?
-  // (for things like std::vector<std::string>::iterator;
-  qualified_name base_name;
-  std::vector<type_name> template_args;
+struct name {
+  // name: <identifier>(< <name>(, <name>)* >)? ([])? (::<name>)?
+  std::string section;
+  std::vector<name> template_args;
+  jaydk::heap_opt<name> next;
   bool is_array;
 };
 
@@ -52,7 +60,7 @@ struct literal_expr {
 };
 
 struct name_expr {
-  qualified_name name;
+  name actual;
 };
 
 struct unary_expr {
@@ -183,55 +191,80 @@ struct namespace_decl {
   std::vector<declaration> declarations;
 };
 
-// TODO: template arguments?
 struct function_decl {
   struct arg {
-    type_name type;
-    std::string name;
+    name type;
+    std::string arg_name;
     location pos;
   };
   struct no_return_type {};
   struct auto_type {};
-  using return_type_t = std::variant<no_return_type, auto_type, type_name>;
+  using return_type_t = std::variant<no_return_type, auto_type, name>;
 
-  std::string name;
+  std::string function_name;
   std::vector<arg> args;
   return_type_t return_type;
   std::vector<statement> body;
 };
 
-// TODO: template arguments?
+struct template_function_decl {
+  struct template_arg {
+    std::string arg_name;
+    std::vector<name> constraints;
+  };
+
+  function_decl base;
+  std::vector<template_arg> template_args;
+};
+
 struct ext_function_decl {
   using arg = function_decl::arg;
-  type_name receiver;
-  std::string name;
+  using return_type_t = function_decl::return_type_t;
+
+  name receiver;
+  std::string ext_func_name;
   std::vector<arg> args;
+  return_type_t return_type;
   std::vector<statement> body;
 };
 
+struct template_ext_function_decl {
+  using template_arg = template_function_decl::template_arg;
+
+  ext_function_decl base;
+  std::vector<template_arg> template_args;
+};
+
 struct global_decl {
-  std::string name;
+  std::string glob_name;
   expression value;
 };
 
 struct typed_global_decl {
-  type_name type;
-  std::string name;
+  name type;
+  std::string glob_name;
   std::optional<expression> initial;
 };
 
 struct type_decl {
-  std::string name;
-  std::vector<std::string> template_args;
-  std::vector<type_name> bases;
+  std::string type_name;
+  std::vector<name> bases;
   std::vector<std::pair<typed_global_decl, location>> fields;
   std::vector<std::pair<function_decl, location>> members;
   std::vector<std::pair<type_decl, location>> nested_types;
 };
 
+struct template_type_decl {
+  using template_arg = template_function_decl::template_arg;
+
+  type_decl base;
+  std::vector<template_arg> template_args;
+};
+
 struct declaration : node {
   using actual_t = std::variant<
-    namespace_decl, function_decl, ext_function_decl, type_decl, global_decl, typed_global_decl
+    namespace_decl, function_decl, template_function_decl, ext_function_decl, template_ext_function_decl,
+    type_decl, template_type_decl, global_decl, typed_global_decl
   >;
 
   template <typename T> requires(jaydk::is_alternative_for<T, actual_t>)

@@ -14,58 +14,30 @@ using namespace jayc::parser;
 
 // no need to check for EOF -> we use an EOF token (so any token-check will fail, return std::nullopt and bubble up)
 
-std::optional<qualified_name> jayc::parser::parse_qname(token_it &iterator) {
-  // <name>(::<name>)*
-  const auto [_, pos] = *iterator;
-  qualified_name res{};
-
-  auto token = *iterator;
-  iterator.consume(); // consume identifier
-  if(!is<identifier>(token.actual)) {
-    logger << expect("qualified name", token);
+std::optional<name> jayc::parser::parse_full_name(token_it &iterator, bool allow_brackets) {
+  // name: identifier(<name(, name)*>)? (::name_no_brack)? ([])?
+  const auto ident = *iterator;
+  iterator.consume();
+  if(!is<identifier>(ident.actual)) {
+    logger << expect_identifier(ident);
     return std::nullopt;
   }
 
-  res.sections.push_back(as<identifier>(token.actual).ident);
-  token = *iterator;
-  while(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::NAMESPACE) {
-    iterator.consume(); // consume ::
-    token = *iterator;
-    iterator.consume(); // consume identifier
-    if(!is<identifier>(token.actual)) {
-      logger << expect("qualified name", token);
-      return std::nullopt;
-    }
-
-    res.sections.push_back(as<identifier>(token.actual).ident);
-    token = *iterator;
-  }
-
-  return res;
-}
-
-std::optional<type_name> jayc::parser::parse_tname(token_it &iterator) {
-  // <qname>(< <tname>(, <tname>)* >)? ([])?
-  const auto [_, pos] = *iterator;
-  auto base = parse_qname(iterator);
-  if(!base.has_value()) {
-    logger << expect("qualified type name", *iterator);
-    return std::nullopt;
-  }
-
-  auto token = *iterator;
-  std::vector<type_name> template_args;
-  if(is<symbol>(iterator->actual) && as<symbol>(iterator->actual) == symbol::LESS_THAN) {
+  std::vector<name> template_args;
+  if(
+    is<symbol>(iterator->actual) && as<symbol>(iterator->actual) == symbol::LESS_THAN && // start of template args
+    is<identifier>(iterator.peek().actual) // don't confuse with operator
+  ) {
     iterator.consume(); // consume <
     while(!iterator.eof()) {
-      const auto tname = parse_tname(iterator);
-      if(!tname.has_value()) {
+      auto arg = parse_type_name(iterator); // allow name<name[]>::name
+      if(!arg.has_value()) {
         logger << expect("template argument", *iterator);
         return std::nullopt;
       }
-      template_args.push_back(*tname);
+      template_args.push_back(std::move(*arg));
 
-      token = *iterator;
+      auto token = *iterator;
       iterator.consume(); // consume , or >
       if(is<symbol>(token.actual)) {
         if(as<symbol>(token.actual) == symbol::GREATER_THAN) {
@@ -84,20 +56,38 @@ std::optional<type_name> jayc::parser::parse_tname(token_it &iterator) {
     }
   }
 
-  bool is_array = false;
-  if(is<symbol>(iterator->actual) && as<symbol>(iterator->actual) == symbol::BRACKET_OPEN) {
-    iterator.consume(); // consume [
-    token = *iterator;
-    iterator.consume(); // consume ]
-    if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACKET_CLOSE) {
-      logger << expect("closing bracket (`]`)", token);
+  heap_opt<name> next = std::nullopt;
+  if(is<symbol>(iterator->actual) && as<symbol>(iterator->actual) == symbol::NAMESPACE) {
+    iterator.consume(); // consume ::
+    auto next_name = parse_full_name(iterator, allow_brackets); // pass on bracket condition to last segment
+    if(!next_name.has_value()) {
+      logger << expect("qualified name", *iterator);
       return std::nullopt;
     }
-
-    is_array = true;
+    next = std::move(*next_name);
   }
 
-  return type_name{ .base_name = std::move(*base), .template_args = std::move(template_args), .is_array = is_array };
+  bool is_array = false;
+  if(allow_brackets && next == std::nullopt) {
+    // only allow brackets if explicitly allowed, and only if this is the last segment
+    if(is<symbol>(iterator->actual) && as<symbol>(iterator->actual) == symbol::BRACKET_OPEN) {
+      iterator.consume(); // consume [
+      auto token = *iterator;
+      iterator.consume(); // consume ]
+      if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACKET_CLOSE) {
+        logger << expect("closing bracket (`]`)", token);
+        return std::nullopt;
+      }
+      is_array = true;
+    }
+  }
+
+  return name{
+    .section = as<identifier>(ident.actual).ident,
+    .template_args = std::move(template_args),
+    .next = std::move(next),
+    .is_array = is_array
+  };
 }
 
 namespace expr_parsers {
@@ -368,7 +358,7 @@ struct expr_pratt {
     }
     if(!left.has_value()) {
       if(is<identifier>(token.actual)) {
-        auto qname = parse_qname(iterator);
+        auto qname = parse_qualified_name(iterator); // we need a (variable) name, not a type name
         if(!qname.has_value()) {
           logger << expect("qualified name", token);
           return left;
@@ -754,6 +744,24 @@ std::optional<statement> parse_return_stmt(token_it &iterator) {
   }
   return check_semi(iterator, statement(return_stmt{ .value = expr }, pos));
 }
+
+std::optional<statement> parse_block_stmt(token_it &iterator) {
+  // { <body> }
+  const auto &[_, pos] = *iterator;
+  iterator.consume(); // consume {
+  std::vector<statement> body;
+  while(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::BRACE_CLOSE) {
+    const auto next = parse_stmt(iterator);
+    if(!next.has_value()) {
+      return std::nullopt;
+    }
+
+    body.push_back(*next);
+  }
+
+  iterator.consume(); // consume }
+  return statement(block{ .statements = body }, pos);
+}
 }
 
 using namespace stmt_parsers;
@@ -765,22 +773,8 @@ std::optional<statement> jayc::parser::parse_stmt(token_it &iterator) {
   }
 
   const auto [actual, pos] = *iterator;
-  if(is<symbol>(actual) && as<symbol>(actual) == symbol::BRACE_OPEN) {
-    // { <body> }
-    iterator.consume(); // consume {
-    std::vector<statement> body;
-    while(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::BRACE_CLOSE) {
-      const auto next = parse_stmt(iterator);
-      if(!next.has_value()) {
-        return std::nullopt;
-      }
-
-      body.push_back(*next);
-    }
-
-    iterator.consume(); // consume }
-    return statement(block{ .statements = body }, pos);
-  }
+  if(is<symbol>(actual) && as<symbol>(actual) == symbol::BRACE_OPEN)
+    return parse_block_stmt(iterator);
 
   if(is<keyword>(actual)) {
     switch(as<keyword>(actual)) {
@@ -808,185 +802,431 @@ std::optional<statement> jayc::parser::parse_stmt(token_it &iterator) {
 }
 
 namespace decl_parsers {
+std::optional<std::vector<template_function_decl::template_arg>> parse_template_args(token_it &iterator) {
+  // <identifier (: name (& name)*)?(, identifier (: name (&name)*)*)>
+  iterator.consume(); // consume <
+  std::vector<template_function_decl::template_arg> template_args;
+
+  token token{};
+  while(!iterator.eof()) {
+    token = *iterator;
+    iterator.consume();
+
+    if(!is<identifier>(token.actual)) {
+      logger << expect("identifier", token);
+      return std::nullopt;
+    }
+    auto name = as<identifier>(token.actual).ident;
+
+    token = *iterator;
+    if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::COLON) {
+      iterator.consume(); // consume :
+      std::vector<::name> constraints;
+
+      while(!iterator.eof()) {
+        auto constraint = parse_type_name(iterator); // type name
+        if(constraint == std::nullopt) return std::nullopt;
+        constraints.push_back(std::move(*constraint));
+
+        token = *iterator;
+        if(is<symbol>(token.actual)) {
+          const auto sym = as<symbol>(token.actual);
+          if(sym == symbol::COMMA) break;
+          if(sym == symbol::GREATER_THAN) break;
+          iterator.consume();
+          if(sym != symbol::BIT_AND) {
+            logger << expect("one of `&` (additional constraint), `,` (next template argument), or `>` (end of template argument list)", token);
+            return std::nullopt;
+          }
+        }
+        else {
+          iterator.consume();
+          logger << expect("one of `&` (next constraint), `,` (next template-arg), or `>` (end of template-arg-list)", token);
+          return std::nullopt;
+        }
+      }
+
+      token = *iterator;
+      iterator.consume();
+      if(is<symbol>(token.actual)) {
+        if(as<symbol>(token.actual) == symbol::GREATER_THAN) break;
+        if(as<symbol>(token.actual) != symbol::COMMA) {
+          logger << expect("comma (`,`) or closing angle bracket (`>`)", token);
+          return std::nullopt;
+        }
+      }
+      else {
+        logger << expect("comma (`,`) or closing angle bracket (`>`)", token);
+        return std::nullopt;
+      }
+    }
+  }
+
+  return template_args;
+}
 
 std::optional<declaration> parse_fun_decl(token_it &iterator) {
-  // fun (<type>.)?<name>((<type> <name>(, <type> <name>)*)?) (: <tname>|auto)? { <body> }
-  const auto [_, fun_pos] = *iterator;
+  // fun
+  //    (<identifier (:name (& name)*)?(, identifier (:name (&name)*)*)>)?
+  //    (name.)?identifier((identifier: name(, identifier: name)*)?) (: name|auto)?
+  //    ({ statement* }| => expr;)
+
+  const auto [_, pos] = *iterator;
   iterator.consume(); // consume fun
 
-  auto token = iterator.peek();
-  std::optional<type_name> receiver; // is null if normal, otherwise typename if receiver
-  if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::PAREN_OPEN) {
-    receiver = std::nullopt;
+  std::vector<template_function_decl::template_arg> template_args;
+  auto token = *iterator;
+  if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::LESS_THAN) {
+    // template arguments
+    auto args = parse_template_args(iterator);
+    if(args == std::nullopt) return std::nullopt;
+    template_args = std::move(*args);
   }
-  else {
-    auto tname = parse_tname(iterator);
-    if(tname == std::nullopt) return std::nullopt;
-    receiver = *tname;
 
-    const auto next = *iterator;
-    if(!is<symbol>(next.actual) || as<symbol>(next.actual) != symbol::DOT) {
-      logger << expect("opening dot (`.`) after function receiver", next);
-    }
+  std::optional<name> receiver; // is std::nullopt if no receiver, otherwise the typename of the receiver
+  auto lookahead = iterator.peek();
+  if(is<symbol>(lookahead.actual) && as<symbol>(lookahead.actual) == symbol::DOT) {
+    // receiver type
+    receiver = parse_type_name(iterator); // type name
+    if(receiver == std::nullopt) return std::nullopt;
     iterator.consume(); // consume .
   }
 
   token = *iterator;
-  iterator.consume(); // consume <name>
   if(!is<identifier>(token.actual)) {
-    logger << expect_identifier({token.actual, token.pos});
+    logger << expect_identifier(token);
     return std::nullopt;
   }
-  const std::string name = as<identifier>(token.actual).ident;
+  auto name = as<identifier>(token.actual).ident;
 
-  iterator.consume(); // consume ( (already checked)
+  token = *iterator;
+  iterator.consume(); // consume (
+  if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::PAREN_OPEN) {
+    logger << expect("opening parenthesis (`(`)", token);
+    return std::nullopt;
+  }
 
+  token = *iterator;
   std::vector<function_decl::arg> args;
-  while(!iterator.eof()) {
-    const auto p = iterator->pos;
-    auto tname = parse_tname(iterator);
-    if(tname == std::nullopt) return std::nullopt;
-    auto a_name = *iterator;
-    iterator.consume(); // consume arg name
-    if(!is<identifier>(a_name.actual)) {
-      logger << expect_identifier(a_name);
+  if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::PAREN_CLOSE) {
+    if(!is<identifier>(token.actual)) {
+      logger << expect("identifier or closing parenthesis (`)`)", token);
       return std::nullopt;
     }
 
-    args.push_back({ .type = *tname, .name = as<identifier>(a_name.actual).ident, .pos = p });
-
-    token = *iterator;
-    iterator.consume(); // consume , or )
-    if(is<symbol>(token.actual)) {
-      if(as<symbol>(token.actual) == symbol::PAREN_CLOSE) {
-        break;
+    while(!iterator.eof()) {
+      token = *iterator;
+      iterator.consume(); // consume identifier
+      auto arg_pos = token.pos;
+      if(!is<identifier>(token.actual)) {
+        logger << expect_identifier(token);
+        return std::nullopt;
       }
-      if(as<symbol>(token.actual) != symbol::COMMA) {
+      std::string arg_name = as<identifier>(token.actual).ident;
+
+      token = *iterator;
+      iterator.consume(); // consume :
+      if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::COLON) {
+        logger << expect("colon (`:`)", token);
+        return std::nullopt;
+      }
+
+      auto type = parse_type_name(iterator); // type name
+      if(type == std::nullopt) return std::nullopt;
+
+      args.emplace_back(std::move(*type), std::move(arg_name), std::move(arg_pos));
+
+      token = *iterator;
+      iterator.consume(); // consume , or )
+      if(is<symbol>(token.actual)) {
+        if(as<symbol>(token.actual) == symbol::PAREN_CLOSE) break;
+        if(as<symbol>(token.actual) != symbol::COMMA) {
+          logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
+          return std::nullopt;
+        }
+      }
+      else {
         logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
         return std::nullopt;
       }
     }
-    else {
-      logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
-      return std::nullopt;
-    }
+  }
+  else {
+    iterator.consume(); // consume )
   }
 
   token = *iterator;
   function_decl::return_type_t ret_type = function_decl::no_return_type{};
   if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::COLON) {
     iterator.consume(); // consume :
-
     token = *iterator;
-    if(is<keyword>(token.actual)) {
-      iterator.consume(); // consume auto
-      if(as<keyword>(token.actual) != keyword::AUTO) {
-        logger << expect("qualified type name or auto", token);
-        return std::nullopt;
-      }
-
+    if(is<keyword>(token.actual) && as<keyword>(token.actual) == keyword::AUTO) {
+      iterator.consume();
       ret_type = function_decl::auto_type{};
     }
     else {
-      auto tname = parse_tname(iterator);
-      if(tname == std::nullopt) return std::nullopt;
-      ret_type = *tname;
+      auto type = parse_type_name(iterator); // type name
+      if(type == std::nullopt) return std::nullopt;
+      ret_type = std::move(*type);
     }
   }
 
   token = *iterator;
-  iterator.consume();
-  if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_OPEN) {
-    logger << expect("opening brace (`{`)", token);
+  iterator.consume(); // consume { or =>
+  std::vector<statement> body;
+  if(is<symbol>(token.actual)) {
+    if(as<symbol>(token.actual) == symbol::ARROW) {
+      // => expr
+      token = *iterator;
+      auto expr_pos = token.pos;
+      auto expr = parse_expr(iterator);
+      if(expr == std::nullopt) return std::nullopt;
+
+      token = *iterator;
+      iterator.consume(); // consume ;
+      if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::SEMI) {
+        logger << expect("semicolon (`;`)", token);
+        return std::nullopt;
+      }
+
+      body.push_back(statement(return_stmt{
+        .value = std::move(*expr)
+      }, expr_pos));
+    }
+    else if(as<symbol>(token.actual) == symbol::BRACE_OPEN) {
+      // { statement* } (same as block)
+      auto block = parse_block_stmt(iterator);
+      if(block == std::nullopt) return std::nullopt;
+      body = std::move(as<::block>(block->content).statements);
+    }
+    else {
+      logger << expect("opening brace (`{`) or arrow (`=>`)", token);
+      return std::nullopt;
+    }
+  }
+  else {
+    logger << expect("opening brace (`{`) or arrow (`=>`)", token);
     return std::nullopt;
   }
 
-  std::vector<statement> body;
-  token = *iterator;
-  while(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_CLOSE) {
-    auto stmt = parse_stmt(iterator);
-    if(stmt == std::nullopt) return std::nullopt;
-    body.push_back(*stmt);
-    token = *iterator;
+  if(receiver.has_value()) {
+    if(!template_args.empty()) {
+      return declaration(
+        template_ext_function_decl{
+          .base = {
+            .receiver = std::move(*receiver), .ext_func_name = std::move(name),
+            .args = std::move(args), .return_type = std::move(ret_type),
+            .body = std::move(body)
+          },
+          .template_args = std::move(template_args)
+        },
+        pos
+      );
+    }
+
+    return declaration(
+      ext_function_decl {
+        .receiver = std::move(*receiver), .ext_func_name = std::move(name),
+        .args = std::move(args), .return_type = std::move(ret_type),
+        .body = std::move(body)
+      },
+      pos
+    );
   }
 
-  iterator.consume(); // consume }
-
-  if(receiver.has_value()) {
+  if(!template_args.empty()) {
     return declaration(
-      ext_function_decl { .receiver = *receiver, .name = name, .args = std::move(args), .body = std::move(body) },
-      fun_pos
+      template_function_decl{
+        .base = {
+          .function_name = std::move(name), .args = std::move(args), .return_type = std::move(ret_type),
+          .body = std::move(body)
+        },
+        .template_args = std::move(template_args)
+      },
+      pos
     );
   }
 
   return declaration(
-    function_decl { .name = name, .args = std::move(args), .return_type = ret_type, .body = std::move(body) },
-    fun_pos
+    function_decl{
+      .function_name = std::move(name), .args = std::move(args), .return_type = std::move(ret_type),
+      .body = std::move(body)
+    },
+    pos
   );
-}
 
-std::optional<declaration> parse_type_decl(token_it &iterator) {
-  // struct <name>(<<template arg>(, <template arg>)*>)? (: <type> (, <type>)*)? { <body> }
-  const auto [_, type_pos] = *iterator;
-  iterator.consume(); // consume struct
-  auto token = *iterator;
-  iterator.consume(); // consume <name>
-  if(!is<identifier>(token.actual)) {
-    logger << expect_identifier(token);
-    return std::nullopt;
-  }
+  /*{
+    const auto [_, fun_pos] = *iterator;
+    iterator.consume(); // consume fun
 
-  const std::string name = as<identifier>(token.actual).ident;
+    auto token = iterator.peek();
+    std::optional<name> receiver; // is null if normal, otherwise typename if receiver
+    if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::PAREN_OPEN) {
+      receiver = std::nullopt;
+    }
+    else {
+      auto tname = parse_full_name(iterator);
+      if(tname == std::nullopt) return std::nullopt;
+      receiver = *tname;
 
-  std::vector<std::string> template_args;
-  if(is<symbol>(iterator->actual) && as<symbol>(iterator->actual) == symbol::LESS_THAN) {
-    iterator.consume(); // consume <
+      const auto next = *iterator;
+      if(!is<symbol>(next.actual) || as<symbol>(next.actual) != symbol::DOT) {
+        logger << expect("opening dot (`.`) after function receiver", next);
+      }
+      iterator.consume(); // consume .
+    }
 
+    token = *iterator;
+    iterator.consume(); // consume <name>
+    if(!is<identifier>(token.actual)) {
+      logger << expect_identifier({token.actual, token.pos});
+      return std::nullopt;
+    }
+    const std::string name = as<identifier>(token.actual).ident;
+
+    iterator.consume(); // consume ( (already checked)
+
+    std::vector<function_decl::arg> args;
     while(!iterator.eof()) {
-      token = *iterator;
-      iterator.consume(); // consume <name>
-      if(!is<identifier>(token.actual)) {
-        logger << expect_identifier(token);
+      const auto p = iterator->pos;
+      auto tname = parse_full_name(iterator);
+      if(tname == std::nullopt) return std::nullopt;
+      auto a_name = *iterator;
+      iterator.consume(); // consume arg name
+      if(!is<identifier>(a_name.actual)) {
+        logger << expect_identifier(a_name);
         return std::nullopt;
       }
 
-      template_args.push_back(as<identifier>(token.actual).ident);
+      args.push_back({ .type = *tname, .name = as<identifier>(a_name.actual).ident, .pos = p });
 
       token = *iterator;
-      iterator.consume(); // consume , or >
+      iterator.consume(); // consume , or )
       if(is<symbol>(token.actual)) {
-        if(as<symbol>(token.actual) == symbol::GREATER_THAN) break;
+        if(as<symbol>(token.actual) == symbol::PAREN_CLOSE) {
+          break;
+        }
         if(as<symbol>(token.actual) != symbol::COMMA) {
-          logger << expect("comma (`,`) or closing bracket (`>`)", token);
+          logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
           return std::nullopt;
         }
       }
       else {
-        logger << expect("comma (`,`) or closing bracket (`>`)", token);
+        logger << expect("comma (`,`) or closing parenthesis (`)`)", token);
         return std::nullopt;
       }
     }
+
+    token = *iterator;
+    function_decl::return_type_t ret_type = function_decl::no_return_type{};
+    if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::COLON) {
+      iterator.consume(); // consume :
+
+      token = *iterator;
+      if(is<keyword>(token.actual)) {
+        iterator.consume(); // consume auto
+        if(as<keyword>(token.actual) != keyword::AUTO) {
+          logger << expect("qualified type name or auto", token);
+          return std::nullopt;
+        }
+
+        ret_type = function_decl::auto_type{};
+      }
+      else {
+        auto tname = parse_full_name(iterator);
+        if(tname == std::nullopt) return std::nullopt;
+        ret_type = *tname;
+      }
+    }
+
+    token = *iterator;
+    iterator.consume();
+    if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_OPEN) {
+      logger << expect("opening brace (`{`)", token);
+      return std::nullopt;
+    }
+
+    std::vector<statement> body;
+    token = *iterator;
+    while(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::BRACE_CLOSE) {
+      auto stmt = parse_stmt(iterator);
+      if(stmt == std::nullopt) return std::nullopt;
+      body.push_back(*stmt);
+      token = *iterator;
+    }
+
+    iterator.consume(); // consume }
+
+    if(receiver.has_value()) {
+      return declaration(
+        ext_function_decl { .receiver = *receiver, .name = name, .args = std::move(args), .body = std::move(body) },
+        fun_pos
+      );
+    }
+
+    return declaration(
+      function_decl { .name = name, .args = std::move(args), .return_type = ret_type, .body = std::move(body) },
+      fun_pos
+    );
+  }*/
+}
+
+std::optional<declaration> parse_type_decl(token_it &iterator) {
+  // struct identifier
+  //    (<identifier (: name (& name)*)?(, identifier (: name (&name)*)*)>)?
+  //    (: name(, name)*)
+  //    { body }
+  const auto [_, pos] = *iterator;
+  iterator.consume(); // consume struct
+
+  auto token = *iterator;
+  iterator.consume(); // consume identifier
+  if(!is<identifier>(token.actual)) {
+    logger << expect_identifier(token);
+    return std::nullopt;
+  }
+  auto name = as<identifier>(token.actual).ident;
+
+  token = *iterator;
+  if(!is<symbol>(token.actual)) {
+    iterator.consume();
+    logger << expect("opening angle bracket (`<`), colon (`:`), or opening brace (`{`)", token);
+    return std::nullopt;
   }
 
-  std::vector<type_name> bases;
-  token = *iterator;
-  if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::COLON) {
-    iterator.consume(); // consume :
-    while(!iterator.eof()) {
-      const auto p = iterator->pos;
-      auto tname = parse_tname(iterator);
-      if(tname == std::nullopt) return std::nullopt;
+  std::vector<template_type_decl::template_arg> template_args{};
+  if(as<symbol>(token.actual) == symbol::LESS_THAN) {
+    // template arguments
+    auto args = parse_template_args(iterator);
+    if(args == std::nullopt) return std::nullopt;
+    template_args = std::move(*args);
+  }
 
-      bases.push_back(*tname);
+  token = *iterator;
+  if(!is<symbol>(token.actual)) {
+    iterator.consume();
+    logger << expect("colon (`:`) or opening brace (`{`)", token);
+    return std::nullopt;
+  }
+
+
+  std::vector<::name> bases{};
+  if(as<symbol>(token.actual) == symbol::COLON) {
+    // base types, explicitly implemented interfaces
+    iterator.consume(); // consume :
+    while (!iterator.eof()) {
+      auto tname = parse_type_name(iterator); // type name
+      if(tname == std::nullopt) return std::nullopt;
+      bases.push_back(std::move(*tname));
 
       token = *iterator;
       if(is<symbol>(token.actual)) {
         if(as<symbol>(token.actual) == symbol::BRACE_OPEN) break;
+        iterator.consume();
         if(as<symbol>(token.actual) != symbol::COMMA) {
           logger << expect("comma (`,`) or opening brace (`{`)", token);
           return std::nullopt;
         }
-        iterator.consume(); // consume ,
       }
       else {
         logger << expect("comma (`,`) or opening brace (`{`)", token);
@@ -1006,8 +1246,8 @@ std::optional<declaration> parse_type_decl(token_it &iterator) {
   std::vector<std::pair<function_decl, location>> members;
   std::vector<std::pair<type_decl, location>> nested;
   while(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::BRACE_CLOSE) {
-    const auto decl = parse_decl(iterator);
-    if(!decl.has_value()) return std::nullopt;
+    auto decl = parse_decl(iterator);
+    if(decl == std::nullopt) return std::nullopt;
 
     if(is<global_decl>(decl->content)) {
       logger << untyped_field(decl->pos);
@@ -1016,25 +1256,31 @@ std::optional<declaration> parse_type_decl(token_it &iterator) {
       logger << ns_in_struct(decl->pos);
     }
     else if(is<typed_global_decl>(decl->content)) {
-      fields.emplace_back(as<typed_global_decl>(decl->content), decl->pos);
+      fields.emplace_back(std::move(as<typed_global_decl>(decl->content)), decl->pos);
     }
     else if(is<function_decl>(decl->content)) {
-      members.emplace_back(as<function_decl>(decl->content), decl->pos);
+      members.emplace_back(std::move(as<function_decl>(decl->content)), decl->pos);
     }
     else if(is<type_decl>(decl->content)) {
-      nested.emplace_back(as<type_decl>(decl->content), decl->pos);
+      nested.emplace_back(std::move(as<type_decl>(decl->content)), decl->pos);
     }
   }
 
-  iterator.consume(); // consume }
+  type_decl base {
+    .type_name = std::move(name), .bases = std::move(bases), .fields = std::move(fields),
+    .members = std::move(members), .nested_types = std::move(nested)
+  };
+  if(!template_args.empty()) {
+    return declaration(
+      template_type_decl{
+        .base = std::move(base),
+        .template_args = std::move(template_args)
+      },
+      pos
+    );
+  }
 
-  return declaration(
-    type_decl{
-      .name = std::move(name), .template_args = std::move(template_args), .bases = std::move(bases),
-      .fields = std::move(fields), .members = std::move(members), .nested_types = std::move(nested)
-    },
-    type_pos
-  );
+  return declaration(base, pos);
 }
 
 std::optional<declaration> parse_ns_decl(token_it &iterator) {
@@ -1100,7 +1346,7 @@ std::optional<declaration> parse_glob_decl(token_it &iterator) {
 
   return declaration(
     global_decl{
-      .name = as<identifier>(name_tok.actual).ident,
+      .glob_name = as<identifier>(name_tok.actual).ident,
       .value = *expr
     },
     var_tok.pos
@@ -1110,7 +1356,7 @@ std::optional<declaration> parse_glob_decl(token_it &iterator) {
 std::optional<declaration> parse_typed_glob_decl(token_it &iterator) {
   // <type> <name> (= <expr>)?;
   const auto pos = iterator->pos;
-  auto type = parse_tname(iterator);
+  auto type = parse_type_name(iterator); // type name
   if(!type.has_value()) return std::nullopt;
 
   auto token = *iterator;
@@ -1139,7 +1385,7 @@ std::optional<declaration> parse_typed_glob_decl(token_it &iterator) {
   return declaration(
     typed_global_decl{
       .type = *type,
-      .name = name,
+      .glob_name = name,
       .initial = initial
     },
     pos
