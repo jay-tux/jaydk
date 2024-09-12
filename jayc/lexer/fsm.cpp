@@ -19,7 +19,7 @@ const std::unordered_map<std::string, keyword> keywords = {
   {"else", keyword::ELSE}, {"for", keyword::FOR}, {"while", keyword::WHILE},
   {"do", keyword::DO}, {"return", keyword::RETURN}, {"break", keyword::BREAK},
   {"continue", keyword::CONTINUE}, {"namespace", keyword::NAMESPACE},
-  {"struct", keyword::STRUCT}, {"auto", keyword::AUTO}
+  {"struct", keyword::STRUCT}, {"auto", keyword::AUTO}, {"val", keyword::VAL}
 };
 
 inline char peek(std::istream &strm) {

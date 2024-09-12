@@ -15,7 +15,7 @@ using namespace jaydk;
 using namespace jayc::lexer;
 
 inline static std::string symbols_source = "+-*/%\n++--=\n==!=<><=>=\n&&||!&|~^<<>>\n.::\n()[]{}\n,;:?\n+=-=*=/=%=\n&=|=^=\n=>";
-inline static std::string keywords_source = "fun\tvar\nif else\tfor\nwhile do\treturn\nbreak continue\tnamespace\nstruct\tauto";
+inline static std::string keywords_source = "fun\tvar\nif else\tfor\nwhile do\treturn\nbreak continue\tnamespace\nstruct\tauto val";
 inline static std::string id_keyword_source = "__ignored fun test var _name continue with2numbers3 ____";
 inline static std::string bool_literal_source = "true false";
 inline static std::string i64_literal_source = "-10 123 -589 +12";
@@ -135,12 +135,12 @@ TEST_SUITE("jayc - lexer (lexing okay)") {
       // 123456789012345 678901234
       // break continue\tnamespace
       {4, 1}, {4, 7}, {4, 16},
-      // 1234567 8901
-      // struct\tauto
-      {5, 1}, {5, 8}
+      // 1234567 89012345
+      // struct\tauto val
+      {5, 1}, {5, 8}, {5, 13}
     };
 
-    for(auto k = keyword::FUN; k <= keyword::AUTO; ++k) {
+    for(auto k = keyword::FUN; k <= keyword::VAL; ++k) {
       REQUIRE_FALSE(lex.is_eof());
       lex >> t;
       CAPTURE(t);

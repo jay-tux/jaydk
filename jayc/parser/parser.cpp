@@ -511,8 +511,8 @@ std::optional<statement> parse_initial_expr_stmt(token_it &iterator) {
   }
 }
 
-std::optional<statement> parse_var_decl_stmt(token_it &iterator) {
-  // var <ident> = <expr>;
+std::optional<statement> parse_var_decl_stmt(token_it &iterator, bool is_mutable) {
+  // var <ident>(: <name>)? = <expr>;
   const auto pos = iterator->pos;
   iterator.consume(); // consume var
 
@@ -523,6 +523,14 @@ std::optional<statement> parse_var_decl_stmt(token_it &iterator) {
     return std::nullopt;
   }
   const std::string name = as<identifier>(token.actual).ident;
+
+  std::optional<::name> type = std::nullopt;
+  token = *iterator;
+  if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::COLON) {
+    iterator.consume(); // consume :
+    type = parse_type_name(iterator);
+    if(type == std::nullopt) return std::nullopt;
+  }
 
   token = *iterator;
   iterator.consume(); // consume =
@@ -541,7 +549,10 @@ std::optional<statement> parse_var_decl_stmt(token_it &iterator) {
     logger << expect("semicolon (`;`)", token);
     return std::nullopt;
   }
-  return statement(var_decl_stmt{ .name = name, .value = *expr }, pos);
+  return statement(
+    var_decl_stmt{ .var_name = name, .type_name = type, .value = *expr, .is_mutable = is_mutable },
+    pos
+  );
 }
 
 std::optional<statement> parse_if_stmt(token_it &iterator) {
@@ -778,7 +789,10 @@ std::optional<statement> jayc::parser::parse_stmt(token_it &iterator) {
 
   if(is<keyword>(actual)) {
     switch(as<keyword>(actual)) {
-      case keyword::VAR: return parse_var_decl_stmt(iterator);
+      case keyword::VAR:
+      case keyword::VAL:
+        return parse_var_decl_stmt(iterator, as<keyword>(actual) == keyword::VAR);
+
       case keyword::IF: return parse_if_stmt(iterator);
       case keyword::FOR: return parse_for_stmt(iterator);
       case keyword::WHILE: return parse_while_stmt(iterator);
@@ -1242,9 +1256,11 @@ std::optional<declaration> parse_type_decl(token_it &iterator) {
     return std::nullopt;
   }
 
-  std::vector<std::pair<typed_global_decl, location>> fields;
+  std::vector<std::pair<global_decl, location>> fields;
   std::vector<std::pair<function_decl, location>> members;
+  std::vector<std::pair<template_function_decl, location>> template_members;
   std::vector<std::pair<type_decl, location>> nested;
+  std::vector<std::pair<template_type_decl, location>> nested_templates;
   while(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::BRACE_CLOSE) {
     auto decl = parse_decl(iterator);
     if(decl == std::nullopt) return std::nullopt;
@@ -1255,20 +1271,30 @@ std::optional<declaration> parse_type_decl(token_it &iterator) {
     else if(is<namespace_decl>(decl->content)) {
       logger << ns_in_struct(decl->pos);
     }
-    else if(is<typed_global_decl>(decl->content)) {
-      fields.emplace_back(std::move(as<typed_global_decl>(decl->content)), decl->pos);
+    else if(is<global_decl>(decl->content)) {
+      fields.emplace_back(std::move(as<global_decl>(decl->content)), decl->pos);
     }
     else if(is<function_decl>(decl->content)) {
       members.emplace_back(std::move(as<function_decl>(decl->content)), decl->pos);
     }
+    else if(is<template_function_decl>(decl->content)) {
+      template_members.emplace_back(std::move(as<template_function_decl>(decl->content)), decl->pos);
+    }
+    else if(is<ext_function_decl>(decl->content) || is<template_ext_function_decl>(decl->content)) {
+      logger << extension_in_struct(decl->pos);
+    }
     else if(is<type_decl>(decl->content)) {
       nested.emplace_back(std::move(as<type_decl>(decl->content)), decl->pos);
+    }
+    else if(is<template_type_decl>(decl->content)) {
+      nested_templates.emplace_back(std::move(as<template_type_decl>(decl->content)), decl->pos);
     }
   }
 
   type_decl base {
     .type_name = std::move(name), .bases = std::move(bases), .fields = std::move(fields),
-    .members = std::move(members), .nested_types = std::move(nested)
+    .members = std::move(members), .template_members = std::move(template_members),
+    .nested_types = std::move(nested), .nested_template_types = std::move(nested_templates)
   };
   if(!template_args.empty()) {
     return declaration(
@@ -1316,8 +1342,8 @@ std::optional<declaration> parse_ns_decl(token_it &iterator) {
   }, ns_pos) | maybe{};
 }
 
-std::optional<declaration> parse_glob_decl(token_it &iterator) {
-  // VAR <name> = <expr>;
+std::optional<declaration> parse_glob_decl(token_it &iterator, bool is_mutable) {
+  // VAR <identifier>(: <name>)? = <expr>;
   const auto var_tok = *iterator; // guaranteed by call
   iterator.consume(); // consume VAR
   const auto name_tok = *iterator;
@@ -1325,6 +1351,14 @@ std::optional<declaration> parse_glob_decl(token_it &iterator) {
   if(!is<identifier>(name_tok.actual)) {
     logger << expect_identifier({name_tok.actual, name_tok.pos});
     return std::nullopt;
+  }
+
+  auto token = *iterator;
+  std::optional<::name> type{};
+  if(is<symbol>(token.actual) && as<symbol>(token.actual) == symbol::COLON) {
+    iterator.consume(); // consume :
+    type = parse_type_name(iterator); // type name
+    if(type == std::nullopt) return std::nullopt;
   }
 
   const auto eq_tok = *iterator;
@@ -1346,49 +1380,10 @@ std::optional<declaration> parse_glob_decl(token_it &iterator) {
 
   return declaration(
     global_decl{
-      .glob_name = as<identifier>(name_tok.actual).ident,
-      .value = *expr
+      .glob_name = as<identifier>(name_tok.actual).ident, .type = type,
+      .value = *expr, .is_mutable = is_mutable
     },
     var_tok.pos
-  ) | maybe{};
-}
-
-std::optional<declaration> parse_typed_glob_decl(token_it &iterator) {
-  // <type> <name> (= <expr>)?;
-  const auto pos = iterator->pos;
-  auto type = parse_type_name(iterator); // type name
-  if(!type.has_value()) return std::nullopt;
-
-  auto token = *iterator;
-  iterator.consume(); // consume <name>
-  if(!is<identifier>(token.actual)) {
-    logger << expect_identifier({token.actual, token.pos});
-    return std::nullopt;
-  }
-
-  const auto name = as<identifier>(token.actual).ident;
-
-  std::optional<expression> initial = std::nullopt;
-  if(is<symbol>(iterator->actual) && as<symbol>(iterator->actual) == symbol::ASSIGN) {
-    iterator.consume(); // consume =
-    initial = parse_expr(iterator);
-    if(initial == std::nullopt) return std::nullopt;
-  }
-
-  token = *iterator;
-  iterator.consume(); // consume ;
-  if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::SEMI) {
-    logger << expect("semicolon (`;`)", token);
-    return std::nullopt;
-  }
-
-  return declaration(
-    typed_global_decl{
-      .type = *type,
-      .glob_name = name,
-      .initial = initial
-    },
-    pos
   ) | maybe{};
 }
 }
@@ -1397,10 +1392,6 @@ using namespace decl_parsers;
 
 std::optional<declaration> jayc::parser::parse_decl(token_it &iterator) {
   const auto &[actual, pos] = *iterator;
-
-  if(is<identifier>(actual)) {
-    return parse_typed_glob_decl(iterator);
-  }
 
   if(!is<keyword>(actual)) {
     logger << expect_decl({actual, pos});
@@ -1418,7 +1409,8 @@ std::optional<declaration> jayc::parser::parse_decl(token_it &iterator) {
       return parse_ns_decl(iterator);
 
     case keyword::VAR:
-      return parse_glob_decl(iterator);
+    case keyword::VAL:
+      return parse_glob_decl(iterator, as<keyword>(actual) == keyword::VAR);
 
     default:
       logger << expect_decl({actual, pos});

@@ -50,32 +50,6 @@ bool operator==(const name &n1, const name &n2) {
   return n1.is_array == n2.is_array;
 }
 
-namespace jayc::parser {
-std::ostream &operator<<(std::ostream &target, const name &n) {
-  target << n.section;
-  if(!n.template_args.empty()) {
-    target << "<";
-    auto it = n.template_args.cbegin();
-    target << *it;
-    ++it;
-    while(it != n.template_args.cend()) {
-      target << ", " << *it;
-      ++it;
-    }
-    target << ">";
-  }
-  if(n.next.has_value()) {
-    target << "::" << *n.next;
-  }
-  if(n.is_array) {
-    target << "[]";
-  }
-  return target;
-}
-}
-
-using jayc::parser::operator<<;
-
 class vec_source {
 public:
   explicit vec_source(std::vector<token> tokens) : tokens{std::move(tokens)} {}
@@ -1001,6 +975,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       CHECK(is<eof>(it->actual));
     }
 
+    // TODO: add typed variables, var vs val
     SUBCASE("var declaration statements") {
       const vec_source source({
         {keyword::VAR, {}}, {identifier{"x"}, {}}, {symbol::ASSIGN, {}}, {literal<int64_t>{42}, {}}, {symbol::SEMI, {}}
@@ -1012,7 +987,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       REQUIRE(res.has_value());
       REQUIRE(is<var_decl_stmt>(res->content));
       const auto &var_decl = as<var_decl_stmt>(res->content);
-      CHECK(var_decl.name == "x");
+      CHECK(var_decl.var_name == "x");
       REQUIRE(is<literal_expr<int64_t>>(var_decl.value.content));
       CHECK(as<literal_expr<int64_t>>(var_decl.value.content).value == 42);
     }
@@ -1300,7 +1275,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &for1 = as<for_stmt>(res->content);
       REQUIRE(is<var_decl_stmt>(for1.init->content));
       const auto &init1 = as<var_decl_stmt>(for1.init->content);
-      CHECK(init1.name == "x");
+      CHECK(init1.var_name == "x");
       REQUIRE(is<literal_expr<int64_t>>(init1.value.content));
       CHECK(as<literal_expr<int64_t>>(init1.value.content).value == 0);
       REQUIRE(is<binary_expr>(for1.condition.content));
@@ -1328,7 +1303,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &for2 = as<for_stmt>(res->content);
       REQUIRE(is<var_decl_stmt>(for2.init->content));
       const auto &init2 = as<var_decl_stmt>(for2.init->content);
-      CHECK(init2.name == "x");
+      CHECK(init2.var_name == "x");
       REQUIRE(is<literal_expr<int64_t>>(init2.value.content));
       CHECK(as<literal_expr<int64_t>>(init2.value.content).value == 0);
       REQUIRE(is<binary_expr>(for2.condition.content));
@@ -1434,7 +1409,6 @@ TEST_SUITE("jayc - parser (parsing okay)") {
   }
 
   // TODO: declarations
-  TEST_CASE("valid declarations") {}
 
   // TODO: mini scripts
 }

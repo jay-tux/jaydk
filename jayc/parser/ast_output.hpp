@@ -56,22 +56,19 @@ inline std::ostream &operator<<(std::ostream &target, const binary_op &bo) {
 #undef OPS
 }
 
-inline std::ostream &operator<<(std::ostream &target, const qualified_name &qn) {
-  if(qn.sections.empty()) return target << "(empty qualified name)";
-
-  target << qn.sections[0];
-  for(size_t i = 1; i < qn.sections.size(); i++) target << "::" << qn.sections[i];
-  return target;
-}
-
-inline std::ostream &operator<<(std::ostream &target, const type_name &tn) {
-  target << tn.base_name;
-  if(!tn.template_args.empty()) {
-    target << "<" << tn.template_args[0];
-    for(size_t i = 1; i < tn.template_args.size(); i++) target << ", " << tn.template_args[i];
+inline std::ostream &operator<<(std::ostream &target, const name &n) {
+  target << n.section;
+  if(!n.template_args.empty()) {
+    target << "<" << n.template_args[0];
+    for(size_t i = 1; i < n.template_args.size(); i++) {
+      target << ", " << n.template_args[i];
+    }
     target << ">";
   }
-  if(tn.is_array) target << "[]";
+  if(n.next.has_value()) {
+    target << "::" << n.next.value();
+  }
+  if(n.is_array) target << " []";
   return target;
 }
 
@@ -84,7 +81,7 @@ struct expr_printer {
            << l.value << "` (at " << pos << ")\n";
   }
   inline void operator()(std::ostream &target, const name_expr &n, const location &pos, const size_t i) const {
-    target << indent{i} << "name: `" << n.name << "` (at " << pos << ")\n";
+    target << indent{i} << "name: `" << n.actual << "` (at " << pos << ")\n";
   }
   inline void operator()(std::ostream &target, const unary_expr &u, const location &pos, const size_t i) const {
     target << indent{i} << "unary operator: " << u.op << " (at " << pos << ") on\n";
@@ -150,7 +147,11 @@ struct stmt_printer {
   }
 
   inline void operator()(std::ostream &target, const var_decl_stmt &r, const location &pos, const size_t i) const {
-    target << indent{i} << "declaration of `" << r.name << "` (at " << pos << "); with initial value:\n";
+    target << indent{i} << "declaration of `" << r.var_name << "` (at " << pos << "); ";
+    if(r.type_name.has_value()) {
+      target << "with explicit type: " << r.type_name.value() << " ";
+    }
+    target << "with initial value:\n";
     print_expr(target, r.value, i + 1);
   }
 
@@ -248,7 +249,7 @@ struct decl_printer {
   }
 
   inline void operator()(std::ostream &target, const function_decl &f, const location &pos, const size_t i) const {
-    target << indent{i} << "declaration of function `" << f.name << "` (at " << pos << ")\n";
+    target << indent{i} << "declaration of function `" << f.function_name << "` (at " << pos << ")\n";
     target << indent{i + 1} << "with " << f.args.size() << " argument(s)\n";
     for(const auto &[t, n, p]: f.args) {
       target << indent{i + 2} << t << " " << n << " (at " << p << ")\n";
@@ -259,8 +260,27 @@ struct decl_printer {
     }
   }
 
+  inline void operator()(std::ostream &target, const template_function_decl &f, const location &pos, const size_t i) const {
+    target << indent{i} << "declaration of function `" << f.base.function_name << "` (at " << pos << ")\n";
+    target << indent{i + 1} << "with " << f.template_args.size() << " template argument(s):\n";
+    for(const auto &n: f.template_args) {
+      target << indent{i + 2} << n.arg_name << ", with " << n.constraints.size() << " constraint(s):\n";
+      for(const auto &c: n.constraints) {
+        target << indent{i + 3} << c << "\n";
+      }
+    }
+    target << indent{i + 1} << "with " << f.base.args.size() << " argument(s)\n";
+    for(const auto &[t, n, p]: f.base.args) {
+      target << indent{i + 2} << t << " " << n << " (at " << p << ")\n";
+    }
+    target << indent{i + 1} << "with body\n";
+    for(const auto &s: f.base.body) {
+      print_stmt(target, s, i + 2);
+    }
+  }
+
   inline void operator()(std::ostream &target, const ext_function_decl &f, const location &pos, const size_t i) const {
-    target << indent{i} << "declaration of function `" << f.name << "` (at " << pos << ")\n";
+    target << indent{i} << "declaration of function `" << f.ext_func_name << "` (at " << pos << ")\n";
     target << indent{i + 1} << "with receiver " << f.receiver << "\n";
     target << indent{i + 1} << "with " << f.args.size() << " argument(s)\n";
     for(const auto &[t, n, p]: f.args) {
@@ -272,13 +292,28 @@ struct decl_printer {
     }
   }
 
-  inline void operator()(std::ostream &target, const type_decl &t, const location &pos, const size_t i) const {
-    target << indent{i} << "declaration of type `" << t.name << "` (at " << pos << ")\n";
-
-    target << indent{i + 1} << "with " << t.template_args.size() << " template argument(s):\n";
-    for(const auto &n: t.template_args) {
-      target << indent{i + 2} << n << "\n";
+  inline void operator()(std::ostream &target, const template_ext_function_decl &f, const location &pos, const size_t i) const {
+    target << indent{i} << "declaration of extension function `" << f.base.ext_func_name << "` (at " << pos << ")\n";
+    target << indent{i + 1} << "with " << f.template_args.size() << " template argument(s):\n";
+    for(const auto &n: f.template_args) {
+      target << indent{i + 2} << n.arg_name << ", with " << n.constraints.size() << " constraint(s):\n";
+      for(const auto &c: n.constraints) {
+        target << indent{i + 3} << c << "\n";
+      }
     }
+    target << indent{i + 1} << "with receiver " << f.base.receiver << "\n";
+    target << indent{i + 1} << "with " << f.base.args.size() << " argument(s)\n";
+    for(const auto &[t, n, p]: f.base.args) {
+      target << indent{i + 2} << t << " " << n << " (at " << p << ")\n";
+    }
+    target << indent{i + 1} << "with body\n";
+    for(const auto &s: f.base.body) {
+      print_stmt(target, s, i + 2);
+    }
+  }
+
+  inline void operator()(std::ostream &target, const type_decl &t, const location &pos, const size_t i) const {
+    target << indent{i} << "declaration of templated type `" << t.type_name << "` (at " << pos << ")\n";
 
     target << indent{i + 1} << "with " << t.bases.size() << " base(s) and/or implemented interface(s):\n";
     for(const auto &n: t.bases) {
@@ -287,7 +322,7 @@ struct decl_printer {
 
     target << indent{i + 1} << "with " << t.fields.size() << " member field(s):\n";
     for(const auto &[tgd, p]: t.fields) {
-      target << indent{i + 2} << tgd.type << " " << tgd.name << " (at " << p << ")";
+      target << indent{i + 2} << tgd.type << " " << tgd.glob_name << " (at " << p << ")";
       if(tgd.initial.has_value()) {
         target << "; with initial value:\n";
         print_expr(target, *tgd.initial, i + 3);
@@ -302,19 +337,82 @@ struct decl_printer {
       (*this)(target, fd, p, i + 2);
     }
 
+    target << indent{i + 1} << "with " << t.members.size() << " templated member function(s):\n";
+    for(const auto &[fd, p]: t.template_members) {
+      (*this)(target, fd, p, i + 2);
+    }
+
     target << indent{i + 1} << "with " << t.nested_types.size() << " nested type(s):\n";
     for(const auto &[td, p]: t.nested_types) {
+      (*this)(target, td, p, i + 2);
+    }
+
+    target << indent{i + 1} << "with " << t.nested_types.size() << " nested templated type(s):\n";
+    for(const auto &[td, p]: t.nested_template_types) {
+      (*this)(target, td, p, i + 2);
+    }
+  }
+
+  inline void operator()(std::ostream &target, const template_type_decl &t, const location &pos, const size_t i) const {
+    target << indent{i} << "declaration of templated type `" << t.base.type_name << "` (at " << pos << ")\n";
+
+    target << indent{i + 1} << "with " << t.template_args.size() << " template argument(s):\n";
+    for(const auto &n: t.template_args) {
+      target << indent{i + 2} << n.arg_name << ", with " << n.constraints.size() << " constraint(s):\n";
+      for(const auto &c: n.constraints) {
+        target << indent{i + 3} << c << "\n";
+      }
+    }
+
+    target << indent{i + 1} << "with " << t.base.bases.size() << " base(s) and/or implemented interface(s):\n";
+    for(const auto &n: t.base.bases) {
+      target << indent{i + 2} << n << "\n";
+    }
+
+    target << indent{i + 1} << "with " << t.base.fields.size() << " member field(s):\n";
+    for(const auto &[tgd, p]: t.base.fields) {
+      target << indent{i + 2} << tgd.type << " " << tgd.glob_name << " (at " << p << ")";
+      if(tgd.initial.has_value()) {
+        target << "; with initial value:\n";
+        print_expr(target, *tgd.initial, i + 3);
+      }
+      else {
+        target << "\n";
+      }
+    }
+
+    target << indent{i + 1} << "with " << t.base.members.size() << " member function(s):\n";
+    for(const auto &[fd, p]: t.base.members) {
+      (*this)(target, fd, p, i + 2);
+    }
+
+    target << indent{i + 1} << "with " << t.base.members.size() << " templated member function(s):\n";
+    for(const auto &[fd, p]: t.base.template_members) {
+      (*this)(target, fd, p, i + 2);
+    }
+
+    target << indent{i + 1} << "with " << t.base.nested_types.size() << " nested type(s):\n";
+    for(const auto &[td, p]: t.base.nested_types) {
+      (*this)(target, td, p, i + 2);
+    }
+
+    target << indent{i + 1} << "with " << t.base.nested_types.size() << " nested templated type(s):\n";
+    for(const auto &[td, p]: t.base.nested_template_types) {
       (*this)(target, td, p, i + 2);
     }
   }
 
   inline void operator()(std::ostream &target, const global_decl &g, const location &pos, const size_t i) const {
-    target << indent{i} << "declaration of global variable `" << g.name << "` (at " << pos << "); with initial value:\n";
+    target << indent{i} << "declaration of global variable `" << g.glob_name << "` (at " << pos << "); ";
+    if(g.type.has_value()) {
+      target << "with explicit type: " << g.type.value() << " ";
+    }
+    target << "with initial value:\n";
     print_expr(target, g.value, i + 1);
   }
 
   inline void operator()(std::ostream &target, const typed_global_decl &t, const location &pos, const size_t i) const {
-    target << indent{i} << "declaration of global variable `" << t.name << "` with type `" << t.type << "` (at " << pos << ")";
+    target << indent{i} << "declaration of global variable `" << t.glob_name << "` with type `" << t.type << "` (at " << pos << ")";
     if(t.initial.has_value()) {
       target << "; with initial value:\n";
       print_expr(target, *t.initial, i + 1);

@@ -28,22 +28,6 @@ enum struct binary_op {
   BOOL_AND, BOOL_OR, BIT_AND, BIT_OR, XOR, SHIFT_LEFT, SHIFT_RIGHT
 };
 
-// struct qualified_name {
-//   // qname: <name>(::<name>)*
-//   std::vector<std::string> sections;
-// };
-//
-// struct type_name {
-//   // tname: <qname>(<<tname>(,<tname>)*>)?([])?
-//   // TODO: update to be:
-//   //    tname: <tname_no_arr> ([])?
-//   //    tname_no_arr: <qname>(<<tname>(, <tname>)*>(::<tname_no_arr>)?)?
-//   // (for things like std::vector<std::string>::iterator;
-//   qualified_name base_name;
-//   std::vector<type_name> template_args;
-//   bool is_array;
-// };
-
 struct name {
   // name: <identifier>(< <name>(, <name>)* >)? ([])? (::<name>)?
   std::string section;
@@ -120,10 +104,11 @@ struct expr_stmt {
   expression expr;
 };
 
-// TODO: allow optional type, allow kotlin-style val/var instead of var only
 struct var_decl_stmt {
-  std::string name;
+  std::string var_name;
+  std::optional<name> type_name;
   expression value;
+  bool is_mutable;
 };
 
 struct assign_stmt {
@@ -237,21 +222,28 @@ struct template_ext_function_decl {
 
 struct global_decl {
   std::string glob_name;
+  std::optional<name> type;
   expression value;
+  bool is_mutable;
 };
 
-struct typed_global_decl {
-  name type;
-  std::string glob_name;
-  std::optional<expression> initial;
-};
+// struct typed_global_decl {
+//   name type;
+//   std::string glob_name;
+//   std::optional<expression> initial;
+//   bool is_mutable;
+// };
+
+struct template_type_decl;
 
 struct type_decl {
   std::string type_name;
   std::vector<name> bases;
-  std::vector<std::pair<typed_global_decl, location>> fields;
+  std::vector<std::pair<global_decl, location>> fields;
   std::vector<std::pair<function_decl, location>> members;
+  std::vector<std::pair<template_function_decl, location>> template_members;
   std::vector<std::pair<type_decl, location>> nested_types;
+  std::vector<std::pair<template_type_decl, location>> nested_template_types;
 };
 
 struct template_type_decl {
@@ -264,7 +256,7 @@ struct template_type_decl {
 struct declaration : node {
   using actual_t = std::variant<
     namespace_decl, function_decl, template_function_decl, ext_function_decl, template_ext_function_decl,
-    type_decl, template_type_decl, global_decl, typed_global_decl
+    type_decl, template_type_decl, global_decl
   >;
 
   template <typename T> requires(jaydk::is_alternative_for<T, actual_t>)

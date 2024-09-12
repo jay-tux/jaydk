@@ -33,7 +33,7 @@ enum class symbol {
   ARROW
 };
 enum class keyword {
-  FUN, VAR, IF, ELSE, FOR, WHILE, DO, RETURN, BREAK, CONTINUE, NAMESPACE, STRUCT, AUTO
+  FUN, VAR, IF, ELSE, FOR, WHILE, DO, RETURN, BREAK, CONTINUE, NAMESPACE, STRUCT, AUTO, VAL
 };
 struct identifier {
   std::string ident;

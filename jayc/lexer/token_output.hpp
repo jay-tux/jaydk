@@ -49,7 +49,7 @@ inline std::ostream &operator<<(std::ostream &target, const keyword &kw) {
 #define X(e) case jayc::lexer::keyword::e: return target << #e;
 #define KEYWORDS \
   X(FUN) X(VAR) X(IF) X(ELSE) X(FOR) X(WHILE) X(DO) X(RETURN) X(BREAK) X(CONTINUE) \
-  X(NAMESPACE) X(STRUCT) X(AUTO)
+  X(NAMESPACE) X(STRUCT) X(AUTO) X(VAL)
 
   switch(kw) {
     KEYWORDS
