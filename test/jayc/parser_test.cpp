@@ -250,7 +250,16 @@ TEST_SUITE("jayc - parser (parsing okay)") {
         {binary_op::BIT_OR, symbol::BIT_OR},
         {binary_op::XOR, symbol::XOR},
         {binary_op::SHIFT_LEFT, symbol::SHIFT_LEFT},
-        {binary_op::SHIFT_RIGHT, symbol::SHIFT_RIGHT}
+        {binary_op::SHIFT_RIGHT, symbol::SHIFT_RIGHT},
+        {binary_op::ASSIGN, symbol::ASSIGN},
+        {binary_op::ADD_ASSIGN, symbol::PLUS_ASSIGN},
+        {binary_op::SUB_ASSIGN, symbol::MINUS_ASSIGN},
+        {binary_op::MUL_ASSIGN, symbol::MULTIPLY_ASSIGN},
+        {binary_op::DIV_ASSIGN, symbol::DIVIDE_ASSIGN},
+        {binary_op::MOD_ASSIGN, symbol::MODULO_ASSIGN},
+        {binary_op::BIT_AND_ASSIGN, symbol::BIT_AND_ASSIGN},
+        {binary_op::BIT_OR_ASSIGN, symbol::BIT_OR_ASSIGN},
+        {binary_op::XOR_ASSIGN, symbol::XOR_ASSIGN},
       };
 
       for(const auto &[op, tok] : ops) {
@@ -347,19 +356,21 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       /*
        * --- precedence ---
        * 1  a::b::c (via parse_qname)
-       * 2 	-> 12 <e>++         <e>--         <e>()         <e>[]         <e>.a
+       * 2 	-> 13 <e>++         <e>--         <e>()         <e>[]         <e>.a
        *          ++<e>         --<e>         +<e>          - <e>         ~<e>          !<e>
-       * 3  -> 11 <e>*<e>       <e>/<e>       <e>%<e>
-       * 4  -> 10 <e>+<e>       <e>-<e>
-       * 5  -> 9  <e> << <e>    <e> >> <e>
-       * 6  -> 8  <e> < <e>     <e> > <e>     <e> <= <e>    <e> >= <e>
-       * 7  -> 7  <e> == <e>    <e> != <e>
-       * 8  -> 6  <e> & <e>
-       * 9  -> 5  <e> ^ <e>
-       * 10 -> 4  <e> | <e>
-       * 11 -> 3  <e> && <e>
-       * 12 -> 2  <e> || <e>
-       * 13 -> 1  <e> ? <e> : <e>
+       * 3  -> 12 <e>*<e>       <e>/<e>       <e>%<e>
+       * 4  -> 11 <e>+<e>       <e>-<e>
+       * 5  -> 10 <e> << <e>    <e> >> <e>
+       * 6  -> 9  <e> < <e>     <e> > <e>     <e> <= <e>    <e> >= <e>
+       * 7  -> 8  <e> == <e>    <e> != <e>
+       * 8  -> 7  <e> & <e>
+       * 9  -> 6  <e> ^ <e>
+       * 10 -> 5  <e> | <e>
+       * 11 -> 4  <e> && <e>
+       * 12 -> 3  <e> || <e>
+       * 13 -> 2  <e> ? <e> : <e>
+       * 14 -> 1  <e> = <e>     <e> += <e>    <e> -= <e>    <e> *= <e>    <e> /= <e>    <e> %= <e>
+       *          <e> &= <e>    <e> |= <e>    <e> ^= <e>
        */
 
       const static auto i = [](const int x) {
@@ -371,12 +382,13 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
       using enum symbol;
       const vec_source source({
-        i(1), o(OR), i(2), o(AND), i(3), o(BIT_OR), i(4), o(XOR), i(5),
+        i(0), o(ASSIGN), i(1), o(OR), i(2), o(AND), i(3), o(BIT_OR), i(4), o(XOR), i(5),
         o(BIT_AND), i(6), o(NOT_EQUALS), i(7), o(GREATER_THAN), i(8),
         o(SHIFT_RIGHT), i(9), o(PLUS), i(10), o(MULTIPLY), i(11)
       });
 
       const std::vector<std::pair<binary_op, int>> expected_sequence = {
+        {binary_op::ASSIGN, 0},
         {binary_op::BOOL_OR, 1}, {binary_op::BOOL_AND, 2}, {binary_op::BIT_OR, 3},
         {binary_op::XOR, 4}, {binary_op::BIT_AND, 5}, {binary_op::NOT_EQUAL, 6},
         {binary_op::GREATER, 7}, {binary_op::SHIFT_RIGHT, 8},
@@ -411,10 +423,12 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       using enum symbol;
       const vec_source source({
         i(1), o(DIVIDE), i(2), o(MINUS), i(3), o(SHIFT_LEFT), i(4), o(LESS_THAN_EQUALS), i(5),
-        o(EQUALS), i(6), o(BIT_AND), i(7), o(XOR), i(8), o(BIT_OR), i(9), o(AND), i(10), o(OR), i(11)
+        o(EQUALS), i(6), o(BIT_AND), i(7), o(XOR), i(8), o(BIT_OR), i(9), o(AND), i(10), o(OR), i(11),
+        o(BIT_AND_ASSIGN), i(12)
       });
 
       const std::vector<std::pair<binary_op, int>> expected_sequence = {
+        {binary_op::BIT_AND_ASSIGN, 12},
         {binary_op::BOOL_OR, 11}, {binary_op::BOOL_AND, 10}, {binary_op::BIT_OR, 9},
         {binary_op::XOR, 8}, {binary_op::BIT_AND, 7}, {binary_op::EQUAL, 6},
         {binary_op::LESS_EQUAL, 5}, {binary_op::SHIFT_LEFT, 4}, {binary_op::SUBTRACT, 3},
@@ -1003,27 +1017,32 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       // #1 -> x = 42;
       auto res = parse_stmt(it);
       REQUIRE(res.has_value());
-      REQUIRE(is<assign_stmt>(res->content));
-      const auto &assign1 = as<assign_stmt>(res->content);
-      REQUIRE(is<name_expr>(assign1.lvalue.content));
-      CHECK(as<name_expr>(assign1.lvalue.content).actual == single_name("x"));
-      REQUIRE(is<literal_expr<int64_t>>(assign1.value.content));
-      CHECK(as<literal_expr<int64_t>>(assign1.value.content).value == 42);
+      REQUIRE(is<expr_stmt>(res->content));
+      const auto &assign1 = as<expr_stmt>(res->content);
+      REQUIRE(is<binary_expr>(assign1.expr.content));
+      const auto &expr1 = as<binary_expr>(assign1.expr.content);
+      CHECK(expr1.op == binary_op::ASSIGN);
+      REQUIRE(is<name_expr>(expr1.left->content));
+      CHECK(as<name_expr>(expr1.left->content).actual == single_name("x"));
+      REQUIRE(is<literal_expr<int64_t>>(expr1.right->content));
+      CHECK(as<literal_expr<int64_t>>(expr1.right->content).value == 42);
 
       // #2 -> arr[3] *= 0;
       res = parse_stmt(it);
       REQUIRE(res.has_value());
-      REQUIRE(is<op_assign_stmt>(res->content));
-      const auto &assign2 = as<op_assign_stmt>(res->content);
-      REQUIRE(is<index_expr>(assign2.lvalue.content));
-      const auto &idx_expr = as<index_expr>(assign2.lvalue.content);
+      REQUIRE(is<expr_stmt>(res->content));
+      const auto &assign2 = as<expr_stmt>(res->content).expr;
+      REQUIRE(is<binary_expr>(assign2.content));
+      const auto &expr2 = as<binary_expr>(assign2.content);
+      REQUIRE(is<index_expr>(expr2.left->content));
+      const auto &idx_expr = as<index_expr>(expr2.left->content);
       REQUIRE(is<name_expr>(idx_expr.base->content));
       CHECK(as<name_expr>(idx_expr.base->content).actual == single_name("arr"));
       REQUIRE(is<literal_expr<int64_t>>(idx_expr.index->content));
       CHECK(as<literal_expr<int64_t>>(idx_expr.index->content).value == 3);
-      REQUIRE(is<literal_expr<int64_t>>(assign2.value.content));
-      CHECK(as<literal_expr<int64_t>>(assign2.value.content).value == 0);
-      CHECK(assign2.op == binary_op::MULTIPLY);
+      REQUIRE(is<literal_expr<int64_t>>(expr2.right->content));
+      CHECK(as<literal_expr<int64_t>>(expr2.right->content).value == 0);
+      CHECK(expr2.op == binary_op::MUL_ASSIGN);
 
       CHECK(is<eof>(it->actual));
     }
@@ -1240,13 +1259,14 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
     SUBCASE("for vs for-each statements") {
       const vec_source source({
-        // for(var x = 0; x < 10; x++) call();
+        // for(var x = 1; x < 10; x *= 10) call();
         {keyword::FOR, {}}, {symbol::PAREN_OPEN, {}}, {keyword::VAR, {}},
-        {identifier{"x"}, {}}, {symbol::ASSIGN, {}}, {literal<int64_t>{0}, {}},
+        {identifier{"x"}, {}}, {symbol::ASSIGN, {}}, {literal<int64_t>{1}, {}},
         {symbol::SEMI, {}}, {identifier{"x"}, {}}, {symbol::LESS_THAN, {}},
         {literal<int64_t>{10}, {}}, {symbol::SEMI, {}}, {identifier{"x"}, {}},
-        {symbol::INCREMENT, {}}, {symbol::PAREN_CLOSE, {}}, {identifier{"call"}, {}},
-        {symbol::PAREN_OPEN, {}}, {symbol::PAREN_CLOSE, {}}, {symbol::SEMI, {}},
+        {symbol::MULTIPLY_ASSIGN, {}}, {literal<int64_t>{10}, {}}, {symbol::PAREN_CLOSE, {}},
+        {identifier{"call"}, {}},{symbol::PAREN_OPEN, {}}, {symbol::PAREN_CLOSE, {}},
+        {symbol::SEMI, {}},
 
         // for(var x = 0; x < 10; x++) arr_check(arr[i]);
         {keyword::FOR, {}}, {symbol::PAREN_OPEN, {}}, {keyword::VAR, {}},
@@ -1267,7 +1287,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
 
       auto it = token_it(source);
 
-      // #1 -> for(var x = 0; x < 10; x++) call();
+      // #1 -> for(var x = 1; x < 10; x *= 10) call();
       auto res = parse_stmt(it);
       CAPTURE(*it);
       REQUIRE(res.has_value());
@@ -1277,7 +1297,7 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       const auto &init1 = as<var_decl_stmt>(for1.init->content);
       CHECK(init1.var_name == "x");
       REQUIRE(is<literal_expr<int64_t>>(init1.value.content));
-      CHECK(as<literal_expr<int64_t>>(init1.value.content).value == 0);
+      CHECK(as<literal_expr<int64_t>>(init1.value.content).value == 1);
       REQUIRE(is<binary_expr>(for1.condition.content));
       const auto &cond1 = as<binary_expr>(for1.condition.content);
       CHECK(cond1.op == binary_op::LESS);
@@ -1285,9 +1305,13 @@ TEST_SUITE("jayc - parser (parsing okay)") {
       CHECK(as<name_expr>(cond1.left->content).actual == single_name("x"));
       REQUIRE(is<literal_expr<int64_t>>(cond1.right->content));
       CHECK(as<literal_expr<int64_t>>(cond1.right->content).value == 10);
-      REQUIRE(is<unary_expr>(for1.update.content));
-      const auto &upd1 = as<unary_expr>(for1.update.content);
-      CHECK(upd1.op == unary_op::POST_INCR);
+      REQUIRE(is<binary_expr>(for1.update.content));
+      const auto &upd1 = as<binary_expr>(for1.update.content);
+      CHECK(upd1.op == binary_op::MUL_ASSIGN);
+      REQUIRE(is<name_expr>(upd1.left->content));
+      CHECK(as<name_expr>(upd1.left->content).actual == single_name("x"));
+      REQUIRE(is<literal_expr<int64_t>>(upd1.right->content));
+      CHECK(as<literal_expr<int64_t>>(upd1.right->content).value == 10);
       REQUIRE(is<expr_stmt>(for1.block->content));
       const auto &block1 = as<expr_stmt>(for1.block->content);
       REQUIRE(is<call_expr>(block1.expr.content));

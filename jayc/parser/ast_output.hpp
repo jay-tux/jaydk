@@ -44,7 +44,9 @@ inline std::ostream &operator<<(std::ostream &target, const binary_op &bo) {
   X(ADD, "+") X(SUBTRACT, "-") X(MULTIPLY, "*") X(DIVIDE, "/") X(MODULO, "%") \
   X(BOOL_AND, "&&") X(BOOL_OR, "||") X(EQUAL, "==") X(NOT_EQUAL, "!=") X(LESS, "<") \
   X(LESS_EQUAL, "<=") X(GREATER, ">") X(GREATER_EQUAL, ">=") \
-  X(SHIFT_LEFT, "<<") X(SHIFT_RIGHT, ">>") X(BIT_AND, "&") X(BIT_OR, "|") X(XOR, "^")
+  X(SHIFT_LEFT, "<<") X(SHIFT_RIGHT, ">>") X(BIT_AND, "&") X(BIT_OR, "|") X(XOR, "^") \
+  X(ASSIGN, "=") X(ADD_ASSIGN, "+=") X(SUB_ASSIGN, "-=") X(MUL_ASSIGN, "*=") X(DIV_ASSIGN, "/=") X(MOD_ASSIGN, "%=") \
+  X(BIT_AND_ASSIGN, "&=") X(BIT_OR_ASSIGN, "|=") X(XOR_ASSIGN, "^=")
 #define X(x, y) case jayc::parser::binary_op::x: return target << y;
 
   switch(bo) {

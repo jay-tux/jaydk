@@ -25,7 +25,9 @@ enum struct unary_op {
 enum struct binary_op {
   ADD, SUBTRACT, MULTIPLY, DIVIDE, MODULO,
   EQUAL, NOT_EQUAL, LESS, GREATER, LESS_EQUAL, GREATER_EQUAL,
-  BOOL_AND, BOOL_OR, BIT_AND, BIT_OR, XOR, SHIFT_LEFT, SHIFT_RIGHT
+  BOOL_AND, BOOL_OR, BIT_AND, BIT_OR, XOR, SHIFT_LEFT, SHIFT_RIGHT,
+  ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, DIV_ASSIGN, MOD_ASSIGN,
+  BIT_AND_ASSIGN, BIT_OR_ASSIGN, XOR_ASSIGN
 };
 
 struct name {
@@ -110,18 +112,6 @@ struct var_decl_stmt {
   expression value;
   bool is_mutable;
 };
-
-struct assign_stmt {
-  expression lvalue;
-  expression value;
-};
-
-struct op_assign_stmt {
-  expression lvalue;
-  binary_op op = binary_op::ADD;
-  expression value;
-};
-
 struct if_stmt {
   expression condition;
   jaydk::managed<statement> true_block;
@@ -156,7 +146,7 @@ struct return_stmt {
 
 struct statement : node {
   using actual_t = std::variant<
-    block, expr_stmt, var_decl_stmt, assign_stmt, op_assign_stmt, if_stmt, for_stmt, for_each_stmt,
+    block, expr_stmt, var_decl_stmt, if_stmt, for_stmt, for_each_stmt,
     while_stmt, break_stmt, continue_stmt, return_stmt
   >;
 
@@ -226,13 +216,6 @@ struct global_decl {
   expression value;
   bool is_mutable;
 };
-
-// struct typed_global_decl {
-//   name type;
-//   std::string glob_name;
-//   std::optional<expression> initial;
-//   bool is_mutable;
-// };
 
 struct template_type_decl;
 

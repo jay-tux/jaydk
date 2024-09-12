@@ -115,47 +115,78 @@ struct expr_pratt {
       case PAREN_OPEN:
       case BRACKET_OPEN:
       case DOT:
-        return 12;
+        return 13;
 
       case MULTIPLY:
       case DIVIDE:
       case MODULO:
-        return 11;
+        return 12;
 
       case PLUS:
       case MINUS:
-        return 10;
+        return 11;
 
       case SHIFT_LEFT:
       case SHIFT_RIGHT:
-        return 9;
+        return 10;
 
       case LESS_THAN:
       case GREATER_THAN:
       case LESS_THAN_EQUALS:
       case GREATER_THAN_EQUALS:
-        return 8;
+        return 9;
 
       case EQUALS:
       case NOT_EQUALS:
-        return 7;
+        return 8;
 
       case BIT_AND:
-        return 6;
+        return 7;
 
       case XOR:
-        return 5;
+        return 6;
 
       case BIT_OR:
-        return 4;
+        return 5;
 
       case AND:
-        return 3;
+        return 4;
 
       case OR:
-        return 2;
+        return 3;
 
       case QUESTION:
+        return 2;
+
+      case ASSIGN:
+      case PLUS_ASSIGN:
+      case MINUS_ASSIGN:
+      case MULTIPLY_ASSIGN:
+      case DIVIDE_ASSIGN:
+      case MODULO_ASSIGN:
+      case BIT_AND_ASSIGN:
+      case BIT_OR_ASSIGN:
+      case XOR_ASSIGN:
+        return 1;
+
+      default:
+        return 0;
+    }
+  }
+
+  constexpr static uint8_t assoc_penalty(const token_t &t) {
+    if(!is<symbol>(t)) return 0;
+    switch(as<symbol>(t)) {
+      using enum symbol;
+      case ASSIGN:
+      case PLUS_ASSIGN:
+      case MINUS_ASSIGN:
+      case MULTIPLY_ASSIGN:
+      case DIVIDE_ASSIGN:
+      case MODULO_ASSIGN:
+      case BIT_AND_ASSIGN:
+      case BIT_OR_ASSIGN:
+      case XOR_ASSIGN:
         return 1;
 
       default:
@@ -214,6 +245,15 @@ struct expr_pratt {
       case symbol::XOR: return binary_op::XOR;
       case symbol::AND: return binary_op::BOOL_AND;
       case symbol::OR: return binary_op::BOOL_OR;
+      case symbol::ASSIGN: return binary_op::ASSIGN;
+      case symbol::PLUS_ASSIGN: return binary_op::ADD_ASSIGN;
+      case symbol::MINUS_ASSIGN: return binary_op::SUB_ASSIGN;
+      case symbol::MULTIPLY_ASSIGN: return binary_op::MUL_ASSIGN;
+      case symbol::DIVIDE_ASSIGN: return binary_op::DIV_ASSIGN;
+      case symbol::MODULO_ASSIGN: return binary_op::MOD_ASSIGN;
+      case symbol::BIT_AND_ASSIGN: return binary_op::BIT_AND_ASSIGN;
+      case symbol::BIT_OR_ASSIGN: return binary_op::BIT_OR_ASSIGN;
+      case symbol::XOR_ASSIGN: return binary_op::XOR_ASSIGN;
 
       default: return std::nullopt;
     }
@@ -336,10 +376,20 @@ struct expr_pratt {
       case symbol::BIT_OR:
       case symbol::XOR:
       case symbol::AND:
-      case symbol::OR: {
-        return merge(parse(precedence_for(s)), bin_op_for(s)) | [&loc, &left](const std::pair<expression, binary_op> &pair) {
-          return expression(binary_expr{ .op = pair.second, .left = alloc(left), .right = alloc(pair.first) }, loc);
-        };
+      case symbol::OR:
+      case symbol::ASSIGN:
+      case symbol::PLUS_ASSIGN:
+      case symbol::MINUS_ASSIGN:
+      case symbol::MULTIPLY_ASSIGN:
+      case symbol::DIVIDE_ASSIGN:
+      case symbol::MODULO_ASSIGN:
+      case symbol::BIT_AND_ASSIGN:
+      case symbol::BIT_OR_ASSIGN:
+      case symbol::XOR_ASSIGN: {
+        return merge(parse(precedence_for(s) - assoc_penalty(s)), bin_op_for(s)) |
+          [&loc, &left](const std::pair<expression, binary_op> &pair) {
+            return expression(binary_expr{ .op = pair.second, .left = alloc(left), .right = alloc(pair.first) }, loc);
+          };
       }
 
       default: {
@@ -395,19 +445,21 @@ struct expr_pratt {
 /*
  * --- precedence ---
  * 1  a::b::c (via parse_qname)
- * 2 	-> 12 <e>++         <e>--         <e>()         <e>[]         <e>.a
+ * 2 	-> 13 <e>++         <e>--         <e>()         <e>[]         <e>.a
  *          ++<e>         --<e>         +<e>          - <e>         ~<e>          !<e>
- * 3  -> 11 <e>*<e>       <e>/<e>       <e>%<e>
- * 4  -> 10 <e>+<e>       <e>-<e>
- * 5  -> 9  <e> << <e>    <e> >> <e>
- * 6  -> 8  <e> < <e>     <e> > <e>     <e> <= <e>    <e> >= <e>
- * 7  -> 7  <e> == <e>    <e> != <e>
- * 8  -> 6  <e> & <e>
- * 9  -> 5  <e> ^ <e>
- * 10 -> 4  <e> | <e>
- * 11 -> 3  <e> && <e>
- * 12 -> 2  <e> || <e>
- * 13 -> 1  <e> ? <e> : <e>
+ * 3  -> 12 <e>*<e>       <e>/<e>       <e>%<e>
+ * 4  -> 11 <e>+<e>       <e>-<e>
+ * 5  -> 10 <e> << <e>    <e> >> <e>
+ * 6  -> 9  <e> < <e>     <e> > <e>     <e> <= <e>    <e> >= <e>
+ * 7  -> 8  <e> == <e>    <e> != <e>
+ * 8  -> 7  <e> & <e>
+ * 9  -> 6  <e> ^ <e>
+ * 10 -> 5  <e> | <e>
+ * 11 -> 4  <e> && <e>
+ * 12 -> 3  <e> || <e>
+ * 13 -> 2  <e> ? <e> : <e>
+ * 14 -> 1  <e> = <e>     <e> += <e>    <e> -= <e>    <e> *= <e>    <e> /= <e>    <e> %= <e>
+ *          <e> &= <e>    <e> |= <e>    <e> ^= <e>
  */
 }
 
@@ -447,68 +499,17 @@ constexpr std::optional<binary_op> compound_assign_op_for(const symbol s) {
 }
 
 std::optional<statement> parse_initial_expr_stmt(token_it &iterator) {
-  // 3 options:
-  // <expr>;
-  // <expr> = <expr>;
-  // <expr> <compound assignment> <expr>;
+  const auto pos = iterator->pos;
+  const auto expr = parse_expr(iterator);
+  if(expr == std::nullopt) return std::nullopt;
 
-  auto pos = iterator->pos;
-  const auto left = parse_expr(iterator);
-  if(left == std::nullopt) return std::nullopt;
-
-  if(!is<symbol>(iterator->actual)) {
-    logger << expect("semicolon (`;`), assignment (`=`), or compound assignment operator", *iterator);
+  if(!is<symbol>(iterator->actual) || as<symbol>(iterator->actual) != symbol::SEMI) {
+    logger << expect("semicolon (`;`)", *iterator);
     iterator.consume();
     return std::nullopt;
   }
-
-  switch(const auto sym = as<symbol>(iterator->actual)) {
-    case symbol::SEMI: {
-      // case 1: <expr>;
-      iterator.consume(); // consume ;
-      return statement(expr_stmt{ .expr = *left }, pos);
-    }
-
-    case symbol::ASSIGN: {
-      //case 2: <expr> = <expr>;
-      iterator.consume(); // consume =
-      const auto right = parse_expr(iterator);
-      if(right == std::nullopt) return std::nullopt;
-
-      return check_semi(iterator, statement(assign_stmt{ .lvalue = *left, .value = *right }, pos));
-    }
-
-    case symbol::PLUS_ASSIGN:
-    case symbol::MINUS_ASSIGN:
-    case symbol::MULTIPLY_ASSIGN:
-    case symbol::DIVIDE_ASSIGN:
-    case symbol::MODULO_ASSIGN:
-    case symbol::BIT_AND_ASSIGN:
-    case symbol::BIT_OR_ASSIGN:
-    case symbol::XOR_ASSIGN: {
-      // case 3: <expr> <compound assignment> <expr>;
-      iterator.consume(); // consume compound assignment
-      const auto right = parse_expr(iterator);
-      if(right == std::nullopt) return std::nullopt;
-
-      auto token = *iterator;
-      iterator.consume();
-      if(!is<symbol>(token.actual) || as<symbol>(token.actual) != symbol::SEMI) {
-        logger << expect("semicolon (`;`)", token);
-        iterator.consume();
-        return std::nullopt;
-      }
-
-      return compound_assign_op_for(sym) | [&left, &right, &pos](const binary_op &op) {
-        return statement(op_assign_stmt{ .lvalue = *left, .op = op, .value = *right }, pos);
-      };
-    }
-
-    default: {
-      logger << expect("semicolon (`;`), assignment (`=`), or compound assignment operator", *iterator);
-      return std::nullopt;
-    }
-  }
+  iterator.consume(); // consume ;
+  return statement(expr_stmt{ .expr = *expr }, pos);
 }
 
 std::optional<statement> parse_var_decl_stmt(token_it &iterator, bool is_mutable) {
