@@ -11,7 +11,9 @@
 #include <optional>
 
 #include "error_queue.hpp"
-#include "util.hpp"
+#include "util/optional_helpers.hpp"
+#include "util/managed.hpp"
+#include "util/variant_helpers.hpp"
 
 namespace jayc::parser {
 struct node {

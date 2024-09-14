@@ -157,23 +157,6 @@ struct stmt_printer {
     print_expr(target, r.value, i + 1);
   }
 
-  inline void operator()(std::ostream &target, const assign_stmt &a, const location &pos, const size_t i) const {
-    target << indent{i} << "assignment (at " << pos << ")\n";
-    target << indent{i + 1} << "to l-value:\n";
-    print_expr(target, a.lvalue, i + 2);
-    target << indent{i + 1} << "with value:\n";
-    print_expr(target, a.value, i + 2);
-  }
-
-  inline void operator()(std::ostream &target, const op_assign_stmt &o, const location &pos, const size_t i) const {
-    target << indent{i} << "assignment (at " << pos << ")\n";
-    target << indent{i + 1} << "to l-value:\n";
-    print_expr(target, o.lvalue, i + 2);
-    target << indent{i + 1} << "using operator " << o.op << "\n";
-    target << indent{i + 1} << "with value:\n";
-    print_expr(target, o.value, i + 2);
-  }
-
   inline void operator()(std::ostream &target, const if_stmt &s, const location &pos, const size_t i) const {
     target << indent{i} << "if statement (at " << pos << ")\n";
     target << indent{i + 1} << "condition:\n";
@@ -215,7 +198,7 @@ struct stmt_printer {
     target << indent{i + 1} << "condition:\n";
     print_expr(target, w.condition, i + 2);
     target << indent{i + 1} << "body:\n";
-    for(const auto &s: w.block) print_stmt(target, s, i + 2);
+    print_stmt(target, *w.block, i + 2);
   }
 
   inline void operator()(std::ostream &target, const break_stmt &, const location &pos, const size_t i) const {
@@ -324,14 +307,15 @@ struct decl_printer {
 
     target << indent{i + 1} << "with " << t.fields.size() << " member field(s):\n";
     for(const auto &[tgd, p]: t.fields) {
-      target << indent{i + 2} << tgd.type << " " << tgd.glob_name << " (at " << p << ")";
-      if(tgd.initial.has_value()) {
-        target << "; with initial value:\n";
-        print_expr(target, *tgd.initial, i + 3);
+      target << indent{i + 2} << (tgd.is_mutable ? "mutable" : "immutable") << tgd.glob_name << " (at " << p << ")";
+      if(tgd.type.has_value()) {
+        target << "; with explicit type: " << *tgd.type << "\n";
       }
       else {
         target << "\n";
       }
+      target << indent{i + 3} << "with initial value:\n";
+      print_expr(target, tgd.value, i + 4);
     }
 
     target << indent{i + 1} << "with " << t.members.size() << " member function(s):\n";
@@ -373,14 +357,15 @@ struct decl_printer {
 
     target << indent{i + 1} << "with " << t.base.fields.size() << " member field(s):\n";
     for(const auto &[tgd, p]: t.base.fields) {
-      target << indent{i + 2} << tgd.type << " " << tgd.glob_name << " (at " << p << ")";
-      if(tgd.initial.has_value()) {
-        target << "; with initial value:\n";
-        print_expr(target, *tgd.initial, i + 3);
+      target << indent{i + 2} << (tgd.is_mutable ? "mutable" : "immutable") << tgd.glob_name << " (at " << p << ")";
+      if(tgd.type.has_value()) {
+        target << "; with explicit type: " << *tgd.type << "\n";
       }
       else {
         target << "\n";
       }
+      target << indent{i + 3} << "with initial value:\n";
+      print_expr(target, tgd.value, i + 4);
     }
 
     target << indent{i + 1} << "with " << t.base.members.size() << " member function(s):\n";
@@ -411,17 +396,6 @@ struct decl_printer {
     }
     target << "with initial value:\n";
     print_expr(target, g.value, i + 1);
-  }
-
-  inline void operator()(std::ostream &target, const typed_global_decl &t, const location &pos, const size_t i) const {
-    target << indent{i} << "declaration of global variable `" << t.glob_name << "` with type `" << t.type << "` (at " << pos << ")";
-    if(t.initial.has_value()) {
-      target << "; with initial value:\n";
-      print_expr(target, *t.initial, i + 1);
-    }
-    else {
-      target << "\n";
-    }
   }
 };
 

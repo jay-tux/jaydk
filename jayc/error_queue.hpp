@@ -11,7 +11,7 @@
 #include <vector>
 #include <ranges>
 
-#include "util.hpp"
+#include "util/variant_helpers.hpp"
 
 namespace jayc {
 struct location {

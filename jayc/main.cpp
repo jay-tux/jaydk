@@ -9,10 +9,14 @@
 
 #include "args.hpp"
 #include "error.hpp"
+
 #include "lexer/lexer.hpp"
 #include "lexer/token_output.hpp"
+
 #include "parser/parser.hpp"
 #include "parser/ast_output.hpp"
+
+#include "semantic_checker/semantic_checker.hpp"
 
 void if_set(std::optional<std::string> &out, const std::string &name, const argparse::ArgumentParser &parser) {
   if(parser.present(name)) out = parser.get<std::string>(name);

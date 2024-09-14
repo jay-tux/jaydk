@@ -7,7 +7,7 @@ add_library(jayc_lib STATIC jayc.cpp
         error_queue.cpp
         lexer/token_stream.cpp lexer/lexer.cpp lexer/fsm.cpp
         parser/parser.cpp
-        parser/ast.cpp
+        semantic_checker/semantic_checker.cpp semantic_checker/hoist_tree.cpp
 )
 add_executable(jayc main.cpp)
 

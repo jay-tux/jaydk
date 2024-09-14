@@ -2,7 +2,6 @@
 // Created by jay on 9/5/24.
 //
 
-#include "util.hpp"
 #include "parser.hpp"
 #include "ast.hpp"
 #include "parse_error.hpp"
