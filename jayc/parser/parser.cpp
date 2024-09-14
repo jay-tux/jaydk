@@ -1419,10 +1419,11 @@ std::optional<declaration> jayc::parser::parse_decl(token_it &iterator) {
 }
 
 ast jayc::parser::build_ast(token_it &iterator) {
-  ast result;
+  ast result{};
+  result.name = "";
   while(!iterator.eof()) {
     if(auto next = parse_decl(iterator); next.has_value())
-      result.push_back(*next);
+      result.declarations.push_back(*next);
   }
   return result;
 }

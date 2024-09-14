@@ -240,6 +240,7 @@ public:
   type();
   type(std::string name, actual_t t, const location &pos) : node{pos}, name{std::move(name)}, content{std::move(t)} {}
 
+  [[nodiscard]] constexpr const std::string &get_name() const { return name; }
   [[nodiscard]] constexpr const actual_t &get_actual() const { return content; }
   [[nodiscard]] constexpr const location &declared_at() const { return pos; }
 

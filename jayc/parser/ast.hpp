@@ -123,7 +123,7 @@ struct if_stmt {
 struct for_stmt {
   jaydk::managed<statement> init;
   expression condition;
-  expression update; // TODO: convert to statement (x++ works, but x += 2 doesn't) -> requires moving assignment to expressions
+  expression update;
   jaydk::managed<statement> block;
 };
 
@@ -252,7 +252,8 @@ struct declaration : node {
 }
 using namespace declarations_;
 
-using ast = std::vector<declaration>;
+// using ast = std::vector<declaration>;
+using ast = namespace_decl;
 }
 
 #endif //AST_HPP

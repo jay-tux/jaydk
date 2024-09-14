@@ -6,8 +6,9 @@
 #define VARIANT_HELPERS_HPP
 
 #include <variant>
-#include <ranges>
 #include <algorithm>
+
+#include "range_helpers.hpp"
 
 namespace jaydk {
 template <typename X, typename ... Ts>
@@ -33,6 +34,11 @@ concept is_alternative_for = is_variant<V>::value && requires(const T &t, V &v)
 {
   { v = t };
 };
+
+template <typename X, std::ranges::range R>
+constexpr auto filter_is_as(R &&range) {
+  return filter_map(range, [](const auto &x) { return is<X>(x); }, [](const auto &x) { return as<X>(x); });
+}
 }
 
 #endif //VARIANT_HELPERS_HPP
