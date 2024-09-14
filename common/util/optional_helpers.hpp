@@ -6,11 +6,31 @@
 #define OPTIONAL_HELPERS_HPP
 
 #include <optional>
+#include <utility>
 
 namespace jaydk {
-template <typename F, typename X> requires(std::invocable<F, X>)
+template <typename F, typename X> requires(std::invocable<F, X> && !std::is_void_v<std::invoke_result_t<F, X>>)
 constexpr std::optional<std::invoke_result_t<F, X>> operator|(const std::optional<X> &opt, F &&f) {
   if(opt.has_value()) return std::optional{f(opt.value())};
+  return std::nullopt;
+}
+
+template <typename F, typename X> requires(std::invocable<F, X> && std::is_void_v<std::invoke_result_t<F, X>>)
+constexpr std::optional<X> operator|(std::optional<X> &opt, F &&f) {
+  if(opt.has_value()) {
+    f(*opt);
+    return opt;
+  }
+  return std::nullopt;
+}
+
+template <typename F, typename X> requires(std::invocable<F, X> && std::is_void_v<std::invoke_result_t<F, X>>)
+constexpr std::optional<X> operator|(const std::optional<X> &opt, F &&f) {
+  if(opt.has_value()) {
+    auto copy = *opt;
+    f(copy);
+    return copy;
+  }
   return std::nullopt;
 }
 
@@ -21,7 +41,9 @@ template <typename T> struct is_optional<std::optional<T>> : std::true_type {};
 
 template <typename F, typename X> requires(std::invocable<F, const X &> && internal_::is_optional<std::invoke_result_t<F, const X &>>::value)
 constexpr std::invoke_result_t<F, const X &> operator>>(const std::optional<X> &opt, F &&f) {
-  if(opt.has_value()) return f(*opt);
+  if(opt.has_value()) {
+    return f(*opt);
+  }
   return std::nullopt;
 }
 

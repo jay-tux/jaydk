@@ -7,6 +7,7 @@
 #include "hoist_tree.hpp"
 #include "sem_ast.hpp"
 #include "mangler.hpp"
+#include "semantic_error.hpp"
 #include "util/optional_helpers.hpp"
 
 using namespace jaydk;
@@ -39,43 +40,60 @@ opt_ref<const type> hoist_tree::lookup_type(const std::string &name) const { ret
 opt_ref<const global> hoist_tree::lookup_global(const std::string &name) const { return hoisted_globals >> name; }
 
 hoist_tree::node &hoist_tree::node::operator[](const std::string &name) {
-  //
+  // TODO: do we need to check for duplicates here?
   return children.emplace(name, node{*tree, *this, mangler::mangle_ns(path_name, name)}).first->second;
 }
 
 template <typename T>
 std::string do_register(
-  const std::string &path_name, const std::string &name, std::unordered_map<std::string, std::string> &map,
+  const std::string &mangled, const std::string &name, std::unordered_map<std::string, std::string> &map,
   std::unordered_map<std::string, managed<T>> &hoisted
 ) {
-  const auto mangled = hoisted.emplace(mangler::mangle_ns(path_name, name), alloc<T>()).first->first;
+  const auto res = hoisted.emplace(mangled, alloc<T>()).first->first;
   map.emplace(name, mangled);
-  return mangled;
+  return res;
 }
 
 void hoist_tree::node::avoid_duplicate(const std::string &name, const location &at) const {
-  //
+  (children >> name) | [this, &name, &at](const node &) -> int {
+    throw semantic_error::redefine_ns(path_name, name, at);
+  } || (functions >> name) | [this, &name, &at](const std::string &f) -> int {
+    throw semantic_error::redefine_X(
+      path_name, "function", name, tree->lookup_function(f).declared_at(), at
+    );
+  } || (contracts >> name) | [this, &name, &at](const std::string &c) -> int {
+    throw semantic_error::redefine_X(
+      path_name, "contract", name, tree->lookup_contract(c).declared_at(), at
+    );
+  } || (types >> name) | [this, &name, &at](const std::string &t) -> int {
+    throw semantic_error::redefine_X(
+      path_name, "type", name, tree->lookup_type(t).declared_at(), at
+    );
+  } || (globals >> name) | [this, &name, &at](const std::string &g) -> int {
+    throw semantic_error::redefine_X(
+      path_name, "global", name, tree->lookup_global(g).declared_at(), at
+    );
+  };
 }
-
 
 std::string hoist_tree::node::register_function(const std::string &name, const location &at) {
   avoid_duplicate(name, at);
-  return do_register(path_name, name, functions, tree->hoisted_functions);
+  return do_register(mangler::mangle_function(path_name, name), name, functions, tree->hoisted_functions);
 }
 
 std::string hoist_tree::node::register_contract(const std::string &name, const location &at) {
   avoid_duplicate(name, at);
-  return do_register(path_name, name, contracts, tree->hoisted_contracts);
+  return do_register(mangler::mangle_contract(path_name, name), name, contracts, tree->hoisted_contracts);
 }
 
 std::string hoist_tree::node::register_type(const std::string &name, const location &at) {
   avoid_duplicate(name, at);
-  return do_register(path_name, name, types, tree->hoisted_types);
+  return do_register(mangler::mangle_initial_type(path_name, name), name, types, tree->hoisted_types);
 }
 
 std::string hoist_tree::node::register_global(const std::string &name, const location &at) {
   avoid_duplicate(name, at);
-  return do_register(path_name, name, globals, tree->hoisted_globals);
+  return do_register(mangler::mangle_global(path_name, name), name, globals, tree->hoisted_globals);
 }
 
 opt_ref<const hoist_tree::node> hoist_tree::node::operator[](const std::string &ns) const {
@@ -92,9 +110,10 @@ std::optional<std::string> hoist_tree::node::get_local(const std::string &name) 
 }
 
 std::optional<std::string> hoist_tree::node::lookup(const std::vector<std::string> &name) const {
-  if(name.empty()) return std::nullopt;
+  if (name.empty())
+    return std::nullopt;
 
-  const node *current = this;
+  const auto *current = this;
 
   while(current != nullptr) {
     const node *local = current;
@@ -119,5 +138,11 @@ std::optional<std::string> hoist_tree::node::lookup(const std::vector<std::strin
 
 std::string hoist_tree::register_nested_type(const std::string &mangled_outer_name, const std::string &name,
                                              const type &t) {
-  //
+  const auto mangled = mangler::mangle_ns(mangled_outer_name, name);
+
+  if (const auto [it, inserted] = hoisted_types.emplace(mangled, alloc(t)); !inserted) {
+    throw semantic_error::redefine_X(mangled_outer_name, "type", name, it->second->declared_at(), t.declared_at());
+  }
+
+  return mangled;
 }

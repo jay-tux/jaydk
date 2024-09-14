@@ -241,7 +241,7 @@ public:
   type(std::string name, actual_t t, const location &pos) : node{pos}, name{std::move(name)}, content{std::move(t)} {}
 
   [[nodiscard]] constexpr const actual_t &get_actual() const { return content; }
-  [[nodiscard]] constexpr location &declared_at() { return pos; }
+  [[nodiscard]] constexpr const location &declared_at() const { return pos; }
 
 private:
   std::string name;

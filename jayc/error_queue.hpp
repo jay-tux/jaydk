@@ -24,6 +24,10 @@ inline std::ostream &operator<<(std::ostream &strm, const location &loc) {
   return strm << loc.file << " (" << loc.line << ":" << loc.col << ")";
 }
 
+inline std::string to_string(const location &loc) {
+  return loc.file + " (" + std::to_string(loc.line) + ":" + std::to_string(loc.col) + ")";
+}
+
 struct info {
   location loc;
   std::string message;
